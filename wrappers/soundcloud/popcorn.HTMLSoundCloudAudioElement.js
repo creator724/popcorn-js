@@ -13,8 +13,8 @@
   function isSoundCloudReady() {
     // If the SoundCloud Widget API + JS SDK aren't loaded, do it now.
     if( !scLoaded ) {
-      Popcorn.getScript( "http://w.soundcloud.com/player/api.js", function() {
-        Popcorn.getScript( "http://connect.soundcloud.com/sdk.js", function() {
+      Popcorn.getScript( "//w.soundcloud.com/player/api.js", function() {
+        Popcorn.getScript( "//connect.soundcloud.com/sdk.js", function() {
           scReady = true;
 
           // XXX: SoundCloud won't let us use real URLs with the API,
@@ -60,7 +60,8 @@
         controls: false,
         loop: false,
         poster: EMPTY_STRING,
-        volume: 1,
+        // SC Volume values are 0-100, we remap to 0-1 in volume getter/setter
+        volume: 100,
         muted: 0,
         currentTime: 0,
         duration: NaN,
@@ -251,6 +252,9 @@
         addPlayerReadyCallback( function() { self.play(); } );
         return;
       }
+      if( impl.ended ) {
+        changeCurrentTime( 0 );
+      }
       player.play();
     };
 
@@ -273,6 +277,8 @@
     }
 
     function onSeeked() {
+      // XXX: make sure seeks don't hold us in the ended state
+      impl.ended = false;
       impl.seeking = false;
       self.dispatchEvent( "timeupdate" );
       self.dispatchEvent( "seeked" );
@@ -300,10 +306,6 @@
     }
 
     function onPlay() {
-      if( impl.ended ) {
-        changeCurrentTime( 0 );
-      }
-
       if ( !currentTimeInterval ) {
         currentTimeInterval = setInterval( monitorCurrentTime,
                                            CURRENT_TIME_MONITOR_MS ) ;
@@ -333,6 +335,14 @@
         changeCurrentTime( 0 );
         self.play();
       } else {
+        // XXX: SoundCloud doesn't manage end/paused state well.  We have to
+        // simulate a pause or we leave the player in a state where it can't
+        // restart playing after ended.  Also, the onPause callback won't get
+        // called when we do self.pause() here, so we manually set impl.paused
+        // to get the state right.
+        self.pause();
+        onPause();
+
         impl.ended = true;
         self.dispatchEvent( "ended" );
       }
@@ -373,6 +383,9 @@
     }
 
     function monitorCurrentTime() {
+      if ( impl.ended ) {
+        return;
+      }
       player.getPosition( function( currentTimeInMS ) {
         // Convert from ms to s
         onCurrentTime( currentTimeInMS / 1000 );
