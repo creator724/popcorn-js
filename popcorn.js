@@ -1834,9 +1834,22 @@
             removeFromArray( this, trackEvent._id );
             addToArray( this, trackEvent );
           } else {
+
+            this.removeTrackEvent( id );
+
+            delete trackEvent._natives;
+            delete trackEvent._running;
+            delete trackEvent.toString;
+
+            //todo: need to rebuild compose and effect strings here
+            delete trackEvent.compose;
+            delete trackEvent.effect;
+
             options = Popcorn.extend( {}, trackEvent, options );
 
-            Popcorn.addTrackEvent( this, options );
+            options._id = id;
+
+            this[ name ]( options );
           }
 
           return this;
