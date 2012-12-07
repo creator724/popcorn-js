@@ -48,7 +48,7 @@
       currentTimeInterval,
       dmRegex = /video\/([^_]+)/,
       events = "canplay canplaythrough ended play pause " +
-               "timeupdate playing seeked seeking volumechange progress";
+               "timeupdate playing seeked seeking volumechange progress",
       eventCallbacks = {},
       lastCurrentTime = 0;
 
