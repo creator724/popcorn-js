@@ -69,9 +69,9 @@
       });
     }
 
-    removeEventListeners() {
+    function removeEventListeners() {
       events.split( " " ).forEach(function( val ) {
-        player.removeEventListener( val, eventcallbacks[ val ] );:
+        player.removeEventListener( val, eventcallbacks[ val ] );
       });
     }
 
