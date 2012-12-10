@@ -1,6 +1,8 @@
-(function( Popcorn, window, document ) {
+(function( window, Popcorn, undefined ) {
 
   var
+
+  document = window.document,
 
   CURRENT_TIME_MONITOR_MS = 16,
   EMPTY_STRING = "",
@@ -523,4 +525,5 @@
     return new HTMLDailymotionVideoElement( id );
   };
   Popcorn.HTMLDailymotionVideoElement._canPlaySrc = HTMLDailymotionVideoElement.prototype._canPlaySrc;
-}( Popcorn, window, document ));
+
+}( this, this.Popcorn ));
