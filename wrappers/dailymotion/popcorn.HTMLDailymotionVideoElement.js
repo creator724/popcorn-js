@@ -13,6 +13,7 @@
   MIN_HEIGHT = 200,
   apiScriptElement,
   apiReadyCallbacks = [],
+  DM,
 
   htmlMode;
 
@@ -26,6 +27,7 @@
     }
 
     if ( window.DM ) {
+      DM = window.DM;
       fn();
     } else {
       // Dailymotion callback for once the script has loaded
@@ -35,6 +37,7 @@
         }
 
         window.dmAsyncInit = function() {
+          DM = window.DM;
           while ( apiReadyCallbacks.length ) {
             ( apiReadyCallbacks.shift() )();
           }
@@ -87,13 +90,17 @@
       lastCurrentTime = 0;
 
     function playerReadyPromise( fn, unique ) {
+      var i;
       if ( playerReady ) {
         fn();
         return;
       }
 
       if ( unique ) {
-        playerReadyCallbacks.splice( playerReadyCallbacks.indexOf( fn ), 1 );
+        i = playerReadyCallbacks.indexOf( fn );
+        if (i >= 0) {
+          playerReadyCallbacks.splice( i, 1 );
+        }
       }
       playerReadyCallbacks.push( fn );
     }
@@ -279,7 +286,11 @@
 
         videoId = dmRegex.exec( impl.src )[ 1 ];
 
-        player = DM.player( parent, {
+        // Dailymotion needs a sacrificial container that it will replace with an iframe
+        elem = document.createElement('div');
+        parent.appendChild(elem);
+
+        player = DM.player( elem, {
           video: videoId,
           width: impl.width,
           height: impl.height,
@@ -295,11 +306,7 @@
           }
         });
 
-        player.addEventListener('onStateChange', function(state) {
-          console.log('onStateChange:' + state);
-        }, true);
-
-        player.addEventListener( "apiready", function apiReady( e ) {
+        player.addEventListener( "apiready", function apiReady() {
           playerReady = true;
 
           setupEventListeners();
