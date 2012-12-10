@@ -8,7 +8,37 @@
   // Dailymotion doesn't give a suggested min size, YouTube suggests 200x200
   // as minimum, video spec says 300x150.
   MIN_WIDTH = 300,
-  MIN_HEIGHT = 200;
+  MIN_HEIGHT = 200,
+  apiScriptElement,
+  apiReadyCallbacks = [];
+
+  function apiReadyPromise( fn ) {
+    if ( !window.DM && !apiScriptElement ) {
+      // Insert the Dailymotion script and wait for it to fire the callback
+      apiScriptElement = document.createElement( "script" );
+      apiScriptElement.async = true;
+      apiScriptElement.src = (document.location.protocol === 'file:' ? 'http:' : document.location.protocol) + "//api.dmcdn.net/all.js";
+      document.head.appendChild( apiScriptElement );
+    }
+
+    if ( window.DM ) {
+      fn();
+    } else {
+      // Dailymotion callback for once the script has loaded
+      if ( !apiReadyCallbacks.length ) {
+        if ( typeof window.dmAsyncInit === 'function' ) {
+          apiReadyCallbacks.push( window.dmAsyncInit );
+        }
+
+        window.dmAsyncInit = function() {
+          while ( apiReadyCallbacks.length ) {
+            ( apiReadyCallbacks.shift() )();
+          }
+        };
+      }
+      apiReadyCallbacks.push(fn);
+    }
+  }
 
   function HTMLDailymotionVideoElement( id ) {
 
@@ -46,19 +76,23 @@
       playerReadyCallbacks = [],
       timeUpdateInterval,
       currentTimeInterval,
-      dmRegex = /video\/([^_]+)/,
+      dmRegex = /video\/([a-z0-9]+)/i,
       events = "canplay canplaythrough ended play pause " +
                "timeupdate playing seeked seeking volumechange progress",
       eventCallbacks = {},
       lastCurrentTime = 0;
 
-    // Namespace all events we'll produce
-    self._eventNamespace = Popcorn.guid( "HTMLDailymotionVideoElement::" );
+    function playerReadyPromise( fn, unique ) {
+      if ( playerReady ) {
+        fn();
+        return;
+      }
 
-    self.parentNode = parent;
-
-    // Mark type as Dailymotion
-    self._util.type = "Dailymotion";
+      if ( unique ) {
+        playerReadyCallbacks.splice( playerReadyCallbacks.indexOf( fn ), 1 );
+      }
+      playerReadyCallbacks.push( fn );
+    }
 
     function setupEventListeners() {
       events.split( " " ).forEach(function( val ) {
@@ -73,10 +107,6 @@
       events.split( " " ).forEach(function( val ) {
         player.removeEventListener( val, eventcallbacks[ val ] );
       });
-    }
-
-    function addPlayerReadyCallback( callback ) {
-      playerReadyCallbacks.unshift( callback );
     }
 
     function updateDuration( newDuration ) {
@@ -128,15 +158,6 @@
       elem = null;
     }
 
-    self.play = function() {
-      if( !playerReady ) {
-        addPlayerReadyCallback( function() { self.play(); } );
-        return;
-      }
-
-      player.play();
-    };
-
     function changeCurrentTime( aTime ) {
       if( !playerReady ) {
         addPlayerReadyCallback( function() { changeCurrentTime( aTime ); } );
@@ -159,15 +180,6 @@
       self.dispatchEvent( "canplay" );
       self.dispatchEvent( "canplaythrough" );
     }
-
-    self.pause = function() {
-      if( !playerReady ) {
-        addPlayerReadyCallback( function() { self.pause(); } );
-        return;
-      }
-
-      player.pause();
-    };
 
     function onPause() {
       impl.paused = true;
@@ -232,37 +244,13 @@
       player.getCurrentTime();
     }
 
-    function setupVideo() {
-
-      // We need to extract the video id out of the Dailymotion url
-      var videoId = dmRegex.exec( impl.src )[ 0 ].split( "video/" )[ 1 ];
-
-      player = DM.player( parent.id, {
-        video: videoId,
-        width: impl.width,
-        height: impl.height,
-        params: {
-          autoplay: +impl.autoplay,
-          // By default lets turn of the video info
-          info: 0,
-          // Also don't display related videos at the end
-          related: 0
-        }
-      });
-
-      player.addEventListener( "apiready", function apiReady( e ) {
-        playerReady = true;
-        var i = playerReadyCallbacks.length;
-        while( i-- ) {
-          playerReadyCallbacks[ i ]();
-          delete playerReadyCallbacks[ i ];
-        }
-        player.removeEventListener( "apiready", apiReady );
-        setupEventListeners();
-      });
-    }
-
     function changeSrc( aSrc ) {
+
+      if ( !aSrc ) {
+        destroyPlayer();
+        return;
+      }
+
       if ( !self._canPlaySrc( aSrc ) ) {
         impl.error = {
           name: "MediaError",
@@ -275,20 +263,48 @@
 
       impl.src = aSrc;
 
-      if ( playerReady ) {
-        destroyPlayer();
-      }
+      apiReadyPromise( function() {
+        // We need to extract the video id out of the Dailymotion url
+        var videoId;
 
-      if ( !playerReady ) {
-        return;
-      }
+        if ( !impl.src ) {
+          if ( player ) {
+            destroyPlayer();
+          }
+        }
 
-      playerReady = false;
+        videoId = dmRegex.exec( impl.src )[ 1 ];
 
-      /*var src = self._util.parseUri( aSrc ),
-          videoId = dmRegex.exec( src )[ 0 ].split( "video/" )[ 1 ];
+        player = DM.player( parent, {
+          video: videoId,
+          width: impl.width,
+          height: impl.height,
+          params: {
+            autoplay: +impl.autoplay,
+            // By default lets turn of the video info
+            info: 0,
+            // Also don't display related videos at the end
+            related: 0/*,
+            logo: 0*/
+          }
+        });
 
-      player.load( videoId );*/
+        player.addEventListener('onStateChange', function(state) {
+          console.log('onStateChange:' + state);
+        }, true);
+
+        player.addEventListener( "apiready", function apiReady( e ) {
+          playerReady = true;
+
+          setupEventListeners();
+
+          player.removeEventListener( "apiready", apiReady );
+
+          while ( playerReadyCallbacks.length ) {
+            ( playerReadyCallbacks.shift() )();
+          }
+        });
+      }, true );
     }
 
     function onVolume( aValue ) {
@@ -340,6 +356,32 @@
       return impl.muted > 0;
     }
 
+    // Namespace all events we'll produce
+    self._eventNamespace = Popcorn.guid( "HTMLDailymotionVideoElement::" );
+
+    self.parentNode = parent;
+
+    self._util = Popcorn.extend( {}, self._util );
+
+    // Mark type as Dailymotion
+    self._util.type = "Dailymotion";
+
+    self.play = function() {
+      function play() {
+        player.play();
+      }
+
+      playerReadyPromise(play, true);
+    };
+
+    self.pause = function() {
+      function pause() {
+        player.pause();
+      }
+
+      playerReadyPromise(pause, true);
+    };
+
     Object.defineProperties( self, {
 
       src: {
@@ -347,7 +389,7 @@
           return impl.src;
         },
         set: function( aSrc ) {
-          if ( aSrc && aSrc !== impl.src ) {
+          if ( aSrc !== impl.src ) {
             changeSrc( aSrc );
           }
         }
@@ -462,11 +504,6 @@
         }
       }
     });
-
-    // Dailymotion callback for once the script has loaded
-    window.dmAsyncInit = function() {
-      setupVideo();
-    };
   }
 
   HTMLDailymotionVideoElement.prototype = new Popcorn._MediaElementProto();
@@ -486,12 +523,4 @@
     return new HTMLDailymotionVideoElement( id );
   };
   Popcorn.HTMLDailymotionVideoElement._canPlaySrc = HTMLDailymotionVideoElement.prototype._canPlaySrc;
-
-  // Insert the Dailymotion script and wait for it to fire the callback
-  var script = document.createElement( "script" ),
-      firstScript = document.getElementsByTagName( "script" )[ 0 ];
-
-  script.async = true;
-  script.src = document.location.protocol + "//api.dmcdn.net/all.js";
-  firstScript.parentNode.insertBefore( script, firstScript );
 }( Popcorn, window, document ));
