@@ -12,7 +12,10 @@
   MIN_WIDTH = 300,
   MIN_HEIGHT = 200,
   apiScriptElement,
-  apiReadyCallbacks = [];
+  apiReadyCallbacks = [],
+
+  controlsMode,
+  logoMode;
 
   function apiReadyPromise( fn ) {
     if ( !window.DM && !apiScriptElement ) {
@@ -286,8 +289,10 @@
             // By default lets turn of the video info
             info: 0,
             // Also don't display related videos at the end
-            related: 0/*,
-            logo: 0*/
+            related: 0,
+            controls: controlsMode,
+            html: controlsMode === 'html',
+            logo: logoMode
           }
         });
 
@@ -356,6 +361,18 @@
 
     function getMuted() {
       return impl.muted > 0;
+    }
+
+    if ( controlsMode === undefined ) {
+      elem = document.createElement( "video" );
+      if ( elem.canPlayType && elem.canPlayType( "video/mp4" ) ) {
+        controlsMode = "html";
+        logoMode = 0;
+      } else {
+        controlsMode = "flash";
+        logoMode = 1; // Dailymotion API bug: flash mode crashes if logo suppressed
+      }
+      elem = null;
     }
 
     // Namespace all events we'll produce
