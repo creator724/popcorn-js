@@ -530,7 +530,7 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLDailymotionVideoElement.prototype._canPlaySrc = function( url ) {
-    return (/dailymotion.com\/video\/([^_]+)/).test( url ) ? "probably" : EMPTY_STRING;
+    return (/dailymotion\.com\/video\/([a-z0-9]+)/i).test( url ) ? "probably" : EMPTY_STRING;
   };
 
   // We'll attempt to support a mime type of video/x-vimeo
