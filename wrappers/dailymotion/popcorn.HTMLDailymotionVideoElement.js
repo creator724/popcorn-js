@@ -14,8 +14,7 @@
   apiScriptElement,
   apiReadyCallbacks = [],
 
-  controlsMode,
-  logoMode;
+  htmlMode;
 
   function apiReadyPromise( fn ) {
     if ( !window.DM && !apiScriptElement ) {
@@ -290,9 +289,9 @@
             info: 0,
             // Also don't display related videos at the end
             related: 0,
-            controls: controlsMode,
-            html: controlsMode === 'html',
-            logo: logoMode
+            controls: htmlMode && "html" || "flash",
+            html: htmlMode,
+            logo: htmlMode // Dailymotion API bug: flash mode crashes if logo suppressed
           }
         });
 
@@ -363,15 +362,9 @@
       return impl.muted > 0;
     }
 
-    if ( controlsMode === undefined ) {
+    if ( htmlMode === undefined ) {
       elem = document.createElement( "video" );
-      if ( elem.canPlayType && elem.canPlayType( "video/mp4" ) ) {
-        controlsMode = "html";
-        logoMode = 0;
-      } else {
-        controlsMode = "flash";
-        logoMode = 1; // Dailymotion API bug: flash mode crashes if logo suppressed
-      }
+      htmlMode = !!( elem.canPlayType && elem.canPlayType( "video/mp4" ) );
       elem = null;
     }
 
