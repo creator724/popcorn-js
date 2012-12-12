@@ -1,10 +1,16 @@
-(function( window, Popcorn, undefined ) {
+(function ( window, Popcorn, undefined ) {
+
+/*
+Note that all unit tests depending on "canplaythrough" will fail on Firefox,
+because Dailymotion will not preload the whole video when using Flash.
+*/
+
+  "use strict";
 
   var
 
   document = window.document,
 
-  CURRENT_TIME_MONITOR_MS = 16,
   EMPTY_STRING = "",
 
   // Dailymotion doesn't give a suggested min size, YouTube suggests 200x200
@@ -15,7 +21,24 @@
   apiReadyCallbacks = [],
   DM,
 
-  htmlMode;
+  htmlMode,
+
+  readyStates = [
+    //HAVE_NOTHING = 0
+    [ "loadstart" ],
+
+    //HAVE_METADATA = 1
+    [ "durationchange", "loadedmetadata" ],
+
+    //HAVE_CURRENT_DATA = 2
+    [ "loadeddata" ],
+
+    //HAVE_FUTURE_DATA = 3
+    [ "loadeddata", "canplay" ],
+
+    //HAVE_ENOUGH_DATA = 4
+    [ "canplaythrough" ]
+  ];
 
   function apiReadyPromise( fn ) {
     if ( !window.DM && !apiScriptElement ) {
@@ -49,11 +72,6 @@
 
   function HTMLDailymotionVideoElement( id ) {
 
-    // Dailymotion API requires postMessage
-    if( !window.postMessage ) {
-      throw "ERROR: HTMLDailymotionVideoElement requires window.postMessage";
-    }
-
     var self = this,
       parent = typeof id === "string" ? Popcorn.dom.find( id ) : id,
       elem,
@@ -68,26 +86,26 @@
         loop: false,
         poster: EMPTY_STRING,
         volume: 1,
-        muted: false,
+        muted: 0,
         currentTime: 0,
         duration: NaN,
         ended: false,
         paused: true,
         width: parent.width|0   ? parent.width  : MIN_WIDTH,
         height: parent.height|0 ? parent.height : MIN_HEIGHT,
-        error: null
+        error: null,
+        progressAmount: null
       },
+      maxReadyState = 0,
+      requestedPlay = false,
+      playEventPending = false,
+      playingEventPending = false,
       playerReady = false,
-      playerUID = Popcorn.guid(),
       player,
       playerReadyCallbacks = [],
-      timeUpdateInterval,
-      currentTimeInterval,
+      stalledTimeout,
       dmRegex = /video\/([a-z0-9]+)/i,
-      events = "canplay canplaythrough ended play pause " +
-               "timeupdate playing seeked seeking volumechange progress",
-      eventCallbacks = {},
-      lastCurrentTime = 0;
+      eventCallbacks = {};
 
     function playerReadyPromise( fn, unique ) {
       var i;
@@ -105,160 +123,162 @@
       playerReadyCallbacks.push( fn );
     }
 
-    function setupEventListeners() {
-      events.split( " " ).forEach(function( val ) {
-        eventCallbacks[ val ] = function() {
-          self.dispatchEvent( val );
+    function registerEventListener( name, src, dest ) {
+      var callback;
+
+      //no duplicates, just in case
+      callback = eventCallbacks[ name ];
+      if ( callback ) {
+        player.removeEventListener( name, callback );
+      }
+
+      if ( typeof src === 'string' ) {
+        callback = function() {
+          var val = player[ dest || src ];
+          if ( impl[ src ] !== val ) {
+            impl[ src ] = val;
+            self.dispatchEvent( name );
+          }
         };
-        player.addEventListener( val, eventCallbacks[ val ] );
-      });
+      } else if ( typeof src === 'function' ) {
+        callback = function ( evt ) {
+          if ( src.apply( this, evt ) ) {
+            self.dispatchEvent( name );
+          }
+        };
+      } else {
+        callback = function () {
+          self.dispatchEvent( name );
+        };
+      }
+
+      eventCallbacks[ name ] = callback;
+      player.addEventListener( name, callback );
     }
 
     function removeEventListeners() {
-      events.split( " " ).forEach(function( val ) {
-        player.removeEventListener( val, eventcallbacks[ val ] );
-      });
+      Popcorn.forEach( eventCallbacks, function ( name, callback ) {
+        player.removeEventListener( name, callback );
+      } );
     }
 
-    function updateDuration( newDuration ) {
-      var oldDuration = impl.duration;
+    function setReadyState( state ) {
+      var i, queue;
 
-      if( oldDuration !== newDuration ) {
-        impl.duration = newDuration;
-        self.dispatchEvent( "durationchange" );
-
-        // Deal with first update of duration
-        if( isNaN( oldDuration ) ) {
-          impl.networkState = self.NETWORK_IDLE;
-          impl.readyState = self.HAVE_METADATA;
-          self.dispatchEvent( "loadedmetadata" );
-
-          self.dispatchEvent( "loadeddata" );
-
-          // Auto-start if necessary
-          if( impl.autoplay ) {
-            self.play();
-          }
-
-          var i = playerReadyCallbacks.length;
-          while( i-- ) {
-            playerReadyCallbacks[ i ]();
-            delete playerReadyCallbacks[ i ];
-          }
-        }
-      }
-    }
-
-    function getDuration() {
-      if( !playerReady ) {
-        // Queue a getDuration() call so we have correct duration info for loadedmetadata
-        addPlayerReadyCallback( function() { getDuration(); } );
+      if ( state <= impl.readyState ) {
+        return;
       }
 
-      player.getDuration();
+      maxReadyState = Math.max( maxReadyState, state );
+      if ( state - impl.readyState > 1 ) {
+        return;
+      }
+
+      impl.readyState++;
+      queue = readyStates[ impl.readyState ];
+      for ( i = 0; i < queue.length; i++ ) {
+        self.dispatchEvent( queue[ i ] );
+      }
+      setReadyState( maxReadyState );
     }
 
     function destroyPlayer() {
+
+      clearTimeout( stalledTimeout );
+
       if( !( playerReady && player ) ) {
         return;
       }
-      clearInterval( currentTimeInterval );
       player.pause();
+
+      removeEventListeners();
 
       parent.removeChild( elem );
       elem = null;
     }
 
-    function changeCurrentTime( aTime ) {
-      if( !playerReady ) {
-        addPlayerReadyCallback( function() { changeCurrentTime( aTime ); } );
-        return;
+    function onDurationChange() {
+      impl.duration = player.duration;
+      if ( impl.readyState < self.HAVE_METADATA ) {
+        setReadyState( self.HAVE_METADATA );
+      } else {
+        self.dispatchEvent( "durationchange" );
       }
 
-      onSeeking();
-      player.seek( aTime );
-    }
-
-    function onSeeking() {
-      impl.seeking = true;
-      self.dispatchEvent( "seeking" );
-    }
-
-    function onSeeked() {
-      impl.seeking = false;
-      self.dispatchEvent( "timeupdate" );
-      self.dispatchEvent( "seeked" );
-      self.dispatchEvent( "canplay" );
-      self.dispatchEvent( "canplaythrough" );
-    }
-
-    function onPause() {
-      impl.paused = true;
-      clearInterval( timeUpdateInterval );
-      self.dispatchEvent( "pause" );
-    }
-
-    function onTimeUpdate() {
-      self.dispatchEvent( "timeupdate" );
-    }
-
-    function onPlay() {
-      if( impl.ended ) {
-        changeCurrentTime( 0 );
+      if ( playEventPending ) {
+        self.dispatchEvent( "play" );
       }
 
-      if ( !currentTimeInterval ) {
-        currentTimeInterval = setInterval( monitorCurrentTime,
-                                           CURRENT_TIME_MONITOR_MS ) ;
-
-        // Only 1 play when video.loop=true
-        if ( impl.loop ) {
-          self.dispatchEvent( "play" );
-        }
-      }
-
-      timeUpdateInterval = setInterval( onTimeUpdate,
-                                        self._util.TIMEUPDATE_MS );
-
-      if( impl.paused ) {
-        impl.paused = false;
-
-        // Only 1 play when video.loop=true
-        if ( !impl.loop ) {
-          self.dispatchEvent( "play" );
-        }
+      if ( playingEventPending ) {
+        playingEventPending = false;
         self.dispatchEvent( "playing" );
       }
+
+      if ( playEventPending ) {
+        playEventPending = false;
+        if ( impl.paused ) {
+          self.dispatchEvent( "pause" );
+        }
+      }
     }
 
-    function onEnded() {
-      if( impl.loop ) {
-        changeCurrentTime( 0 );
-        self.play();
+    function onStalled() {
+      if ( !impl.duration || impl.progressAmount < impl.duration ) {
+          impl.networkState = self.NETWORK_IDLE;
+          self.dispatchEvent( "stalled" );
       } else {
-        impl.ended = true;
-        self.dispatchEvent( "ended" );
+        monitorStalled();
       }
     }
 
-    function onCurrentTime( aTime ) {
-      var currentTime = impl.currentTime = aTime;
+    function monitorStalled() {
+      // if progress doesn't happen for 3 seconds, fire "stalled" event
 
-      if( currentTime !== lastCurrentTime ) {
-        self.dispatchEvent( "timeupdate" );
-      }
-
-      lastCurrentTime = impl.currentTime;
-    }
-
-    function monitorCurrentTime() {
-      player.getCurrentTime();
+      clearTimeout( stalledTimeout );
+      stalledTimeout = setTimeout( onStalled, 3000 );
     }
 
     function changeSrc( aSrc ) {
 
+      // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#media-element-load-algorithm
+
+      destroyPlayer();
+
+      impl.readyState = -1;
+      maxReadyState = -1;
+      playEventPending = false;
+      playingEventPending = false;
+
+      if ( impl.networkState !== self.NETWORK_EMPTY ) {
+        if ( impl.networkState === self.NETWORK_LOADING || impl.networkState === self.NETWORK_IDLE ) {
+          self.dispatchEvent( "abort" );
+        }
+        self.dispatchEvent( "emptied" );
+      }
+
+      if ( !impl.paused ) {
+        if ( playerReady ) {
+          player.pause();
+        }
+        impl.paused = false;
+      }
+      requestedPlay = !!impl.autoplay;
+
+      impl.seeking = false;
+
+      impl.duration = NaN;
+
+      if ( impl.currentTime ) {
+        impl.currentTime = 0;
+        self.dispatchEvent( "timeupdate" );
+      }
+
+      impl.error = null;
+
+      // technically, an empty src should fire MEDIA_ERR_SRC_NOT_SUPPORTED
+      // but we allow it for now as a way to clean up the player
       if ( !aSrc ) {
-        destroyPlayer();
+        impl.readyState = self.HAVE_NOTHING;
         return;
       }
 
@@ -266,13 +286,19 @@
         impl.error = {
           name: "MediaError",
           message: "Media Source Not Supported",
-          code: MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+          code: window.MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
         };
+        impl.networkState = self.NETWORK_NO_SRC;
         self.dispatchEvent( "error" );
         return;
       }
 
+      // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
+
       impl.src = aSrc;
+
+      impl.networkState = self.NETWORK_LOADING;
+      setReadyState( self.HAVE_NOTHING );
 
       apiReadyPromise( function() {
         // We need to extract the video id out of the Dailymotion url
@@ -302,42 +328,162 @@
             related: 0,
             controls: htmlMode && "html" || "flash",
             html: htmlMode,
-            logo: htmlMode // Dailymotion API bug: flash mode crashes if logo suppressed
+            logo: !htmlMode && 1 || 0 // Dailymotion API bug: flash mode crashes if logo suppressed
           }
-        });
+        } );
 
         player.addEventListener( "apiready", function apiReady() {
           playerReady = true;
-
-          setupEventListeners();
 
           player.removeEventListener( "apiready", apiReady );
 
           while ( playerReadyCallbacks.length ) {
             ( playerReadyCallbacks.shift() )();
           }
-        });
+        } );
+
+        playerReadyPromise( function () {
+          // set up event listeners
+          registerEventListener( "error" );
+
+          monitorStalled();
+
+          registerEventListener( "progress", function () {
+            if ( !impl.duration && player.duration ) {
+              onDurationChange();
+            }
+
+            if ( player.bufferedTime < Infinity ) {
+              impl.progressAmount = player.bufferedTime;
+            }
+            impl.progressAmount = Math.max( impl.progressAmount, player.currentTime );
+
+            setReadyState( self.HAVE_CURRENT_DATA );
+
+            if ( impl.progressAmount >= impl.duration ) {
+              impl.networkState = self.NETWORK_IDLE;
+              setReadyState( self.HAVE_CURRENT_DATA );
+              setReadyState( self.HAVE_FUTURE_DATA );
+              setReadyState( self.HAVE_ENOUGH_DATA );
+            } else {
+              impl.networkState = self.NETWORK_LOADING;
+              monitorStalled();
+            }
+            return true;
+          } );
+
+          registerEventListener( "stalled", onStalled );
+
+          registerEventListener( "timeupdate", "currentTime" );
+          registerEventListener( "durationchange", onDurationChange );
+
+          registerEventListener( "volumechange", function() {
+            var volume = player.volume,
+              muted = player.muted;
+
+            if ( impl.volume !== volume || impl.muted !== muted ) {
+              impl.volume = volume;
+              impl.muted = muted;
+              return true;
+            }
+          } );
+
+          registerEventListener( "canplay", function () {
+            if ( !impl.duration && player.duration ) {
+              onDurationChange();
+            }
+
+            setReadyState( self.HAVE_CURRENT_DATA );
+            setReadyState( self.HAVE_FUTURE_DATA );
+
+            if ( !requestedPlay ) {
+              player.pause();
+            }
+          } );
+
+          registerEventListener( "canplaythrough", function () {
+            setReadyState( self.HAVE_ENOUGH_DATA );
+          } );
+
+          registerEventListener( "play", function () {
+            if ( !requestedPlay ) {
+              player.pause();
+              return false;
+            }
+            if ( impl.paused ) {
+              impl.paused = false;
+              if ( !impl.duration) {
+                playEventPending = true;
+              } else {
+                return true;
+              }
+            }
+          } );
+
+          registerEventListener( "seeking" , function () {
+            impl.seeking = true;
+            return true;
+          } );
+
+          registerEventListener( "seeked" , function () {
+            if ( impl.seeking ) {
+              impl.seeking = false;
+              return true;
+            }
+          } );
+
+          registerEventListener( "playing", function () {
+            if ( !impl.duration && player.duration ) {
+              onDurationChange();
+            }
+
+            if ( !impl.duration ) {
+              playingEventPending = true;
+              return false;
+            }
+            setReadyState( self.HAVE_CURRENT_DATA );
+            setReadyState( self.HAVE_FUTURE_DATA );
+
+            // DM will sometimes fail to fire "seeking"
+            if ( impl.seeking ) {
+              impl.seeking = false;
+              self.dispatchEvent( "seeked" );
+            }
+
+            return true;
+          } );
+
+          registerEventListener( "pause", function () {
+            if ( !impl.paused ) {
+              //if ( impl.loop && player.currentTime >= impl.duration ) {
+              //  return false;
+              //}
+              impl.paused = true;
+              return requestedPlay && !!impl.duration;
+            }
+          } );
+
+          registerEventListener( "ended", function () {
+            if ( impl.loop ) {
+              player.seek( 0 );
+              player.play();
+            } else {
+              impl.ended = true;
+              return true;
+            }
+          } );
+
+          if ( !impl.autoplay && !impl.duration ) {
+            player.play();
+            //will pause again on next event. pause sometimes crashes here
+          }
+        } );
+
       }, true );
     }
 
-    function onVolume( aValue ) {
-      if ( impl.volume !== aValue ) {
-        impl.volume = aValue;
-        self.dispatchEvent( "volumechange" );
-      }
-    }
-
-    function setVolume( aValue ) {
-      impl.volume = aValue;
-
-      if( !playerReady ) {
-        addPlayerReadyCallback( function() {
-          setVolume( aValue );
-        });
-        return;
-      }
-      player.setVolume( aValue );
-      self.dispatchEvent( "volumechange" );
+    function setVolume() {
+      player.setVolume( impl.volume );
     }
 
     function getVolume() {
@@ -345,28 +491,16 @@
       return impl.muted > 0 ? impl.muted : impl.volume;
     }
 
-    function setMuted( aMute ) {
-      if( !playerReady ) {
-        impl.muted = aMute ? 1 : 0;
-        addPlayerReadyCallback( function() {
-          setMuted( aMute );
-        });
-        return;
-      }
-
-      // Move the existing volume onto muted to cache
-      // until we unmute, and set the volume to 0.
-      if( aMute ) {
-        impl.muted = impl.volume;
-        setVolume( 0 );
-      } else {
-        impl.muted = 0;
-        setVolume( impl.muted );
-      }
+    function setMuted() {
+      player.setMuted( impl.muted );
     }
 
     function getMuted() {
       return impl.muted > 0;
+    }
+
+    function setCurrentTime() {
+      player.seek( impl.currentTime );
     }
 
     if ( htmlMode === undefined ) {
@@ -385,20 +519,25 @@
     // Mark type as Dailymotion
     self._util.type = "Dailymotion";
 
-    self.play = function() {
+    self.play = function () {
       function play() {
         player.play();
       }
 
+      requestedPlay = true;
       playerReadyPromise(play, true);
     };
 
-    self.pause = function() {
+    self.pause = function () {
       function pause() {
         player.pause();
       }
 
       playerReadyPromise(pause, true);
+    };
+
+    self.load = function () {
+      changeSrc( impl.src );
     };
 
     Object.defineProperties( self, {
@@ -452,10 +591,24 @@
 
       currentTime: {
         get: function() {
-          return impl.currentTime;
+          return player && player.currentTime || 0;
         },
         set: function( aValue ) {
-          changeCurrentTime( aValue );
+          aValue = parseFloat( aValue );
+          /*
+          if( !impl.duration || aValue < 0 || impl.duration > 1 || isNaN( aValue ) ) {
+            throw "Invalid currentTime";
+          }
+          */
+
+          impl.currentTime = aValue;
+          playerReadyPromise( setCurrentTime, true );
+        }
+      },
+
+      currentSrc: {
+        get: function() {
+          return impl.src;
         }
       },
 
@@ -500,11 +653,14 @@
           return getVolume();
         },
         set: function( aValue ) {
-          if( aValue < 0 || aValue > 1 ) {
+          aValue = parseFloat( aValue );
+          if( aValue < 0 || aValue > 1 || isNaN( aValue ) ) {
             throw "Volume value must be between 0.0 and 1.0";
           }
 
-          setVolume( aValue );
+          impl.volume = aValue;
+          playerReadyPromise( setVolume, true );
+          self.dispatchEvent( "volumechange" );
         }
       },
 
@@ -513,7 +669,9 @@
           return getMuted();
         },
         set: function( aValue ) {
-          setMuted( self._util.isAttributeSet( aValue ) );
+          impl.muted = self._util.isAttributeSet( aValue ) && 1 || 0;
+          playerReadyPromise( setMuted, true );
+          self.dispatchEvent( "volumechange" );
         }
       },
 
@@ -522,7 +680,7 @@
           return impl.error;
         }
       }
-    });
+    } );
   }
 
   HTMLDailymotionVideoElement.prototype = new Popcorn._MediaElementProto();
@@ -530,7 +688,7 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLDailymotionVideoElement.prototype._canPlaySrc = function( url ) {
-    return (/dailymotion\.com\/video\/([a-z0-9]+)/i).test( url ) ? "probably" : EMPTY_STRING;
+    return (/dailymotion\.com\/(embed\/)?video\/([a-z0-9]+)/i).test( url ) ? "probably" : EMPTY_STRING;
   };
 
   // We'll attempt to support a mime type of video/x-vimeo
