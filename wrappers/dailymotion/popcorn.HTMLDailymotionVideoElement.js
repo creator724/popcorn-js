@@ -579,7 +579,7 @@ because Dailymotion will not preload the whole video when using Flash.
 
       width: {
         get: function() {
-          return elem.width;
+          return elem && elem.width || impl.width;
         },
         set: function( aValue ) {
           impl.width = aValue;
@@ -589,7 +589,7 @@ because Dailymotion will not preload the whole video when using Flash.
 
       height: {
         get: function() {
-          return elem.height;
+          return elem && elem.height || impl.height;
         },
         set: function( aValue ) {
           impl.height = aValue;
