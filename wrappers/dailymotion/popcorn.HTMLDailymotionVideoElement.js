@@ -1,6 +1,7 @@
 (function ( window, Popcorn, undefined ) {
-
 /*
+http://www.dailymotion.com/doc/api/player.html
+
 Note that all unit tests depending on "canplaythrough" will fail on Firefox,
 because Dailymotion will not preload the whole video when using Flash.
 */
@@ -702,3 +703,24 @@ because Dailymotion will not preload the whole video when using Flash.
   Popcorn.HTMLDailymotionVideoElement._canPlaySrc = HTMLDailymotionVideoElement.prototype._canPlaySrc;
 
 }( this, this.Popcorn ));
+/*
+## readyState reference ##
+
+impl.duration > 0
+- readyState: HAVE_METADATA
+  - durationchange
+  - loadedmetadata
+
+first progress event
+- readyState: HAVE_CURRENT_DATA
+  - loadeddata
+
+canplay event (or playing)
+- readyState: HAVE_FUTURE_DATA
+  - loadeddata
+  - canplay
+
+canplaythrough or progressAmount >= duration
+- readyState: HAVE_ENOUGH_DATA
+  - canplaythrough
+*/
