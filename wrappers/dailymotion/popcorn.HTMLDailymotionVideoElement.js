@@ -239,6 +239,11 @@ because Dailymotion will not preload the whole video when using Flash.
       stalledTimeout = setTimeout( onStalled, 3000 );
     }
 
+    function updateSize() {
+      player.width = impl.width;
+      player.height = impl.height;
+    }
+
     function changeSrc( aSrc ) {
 
       // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#media-element-load-algorithm
@@ -578,6 +583,7 @@ because Dailymotion will not preload the whole video when using Flash.
         },
         set: function( aValue ) {
           impl.width = aValue;
+          playerReadyPromise( updateSize );
         }
       },
 
@@ -587,6 +593,7 @@ because Dailymotion will not preload the whole video when using Flash.
         },
         set: function( aValue ) {
           impl.height = aValue;
+          playerReadyPromise( updateSize );
         }
       },
 
