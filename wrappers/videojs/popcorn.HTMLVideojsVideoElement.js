@@ -47,22 +47,22 @@
       apiCSS.rel = "stylesheet";
       apiCSS.href = ( document.location.protocol === "file:" ? "http:" : document.location.protocol ) + "//vjs.zencdn.net/c/video-js.css";
 
-			document.head.appendChild( apiCSS );
+      document.head.appendChild( apiCSS );
       document.head.appendChild( apiScriptElement );
     }
 
-		// VideoJS doesn't notify us when the script has loaded so we have to do poll
-		// and check for existance of _V_ on the window
-		function checkAPIReady() {
-			if ( window._V_ ) {
-				_V_ = window._V_;
-				while ( apiReadyCallbacks.length ) {
-					( apiReadyCallbacks.shift() )();
-				}
-				return;
-			}
-			setTimeout( checkAPIReady, 10 );
-		}
+    // VideoJS doesn't notify us when the script has loaded so we have to do poll
+    // and check for existance of _V_ on the window
+    function checkAPIReady() {
+      if ( window._V_ ) {
+        _V_ = window._V_;
+        while ( apiReadyCallbacks.length ) {
+          ( apiReadyCallbacks.shift() )();
+        }
+        return;
+      }
+      setTimeout( checkAPIReady, 10 );
+    }
 
     if ( window._V_ ) {
       _V_ = window._V_;
@@ -303,46 +303,46 @@
           }
         }
 
-				if ( !self._canPlaySrc( aSrc ) ) {
-					impl.error = {
-						name: "MediaError",
-						message: "Media Source Not Supported",
-						code: window.MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
-					};
-					impl.networkState = self.NETWORK_NO_SRC;
-					self.dispatchEvent( "error" );
-					return;
-				}
+        if ( !self._canPlaySrc( aSrc ) ) {
+          impl.error = {
+            name: "MediaError",
+            message: "Media Source Not Supported",
+            code: window.MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+          };
+          impl.networkState = self.NETWORK_NO_SRC;
+          self.dispatchEvent( "error" );
+          return;
+        }
 
-				if ( !elem ) {
-					elem = document.createElement( "video" );
+        if ( !elem ) {
+          elem = document.createElement( "video" );
 
-					elem.width = impl.width;
-					elem.setAttribute( "class", "video-js vjs-default-skin" );
-					elem.height = impl.height;
-					elem.loop = impl.loop;
-					elem.preload = "auto";
-					elem.autoplay = impl.autoplay;
-					// Seems that videojs needs the controls to always be present
-					elem.controls = true;
-					elem.src = impl.src;
+          elem.width = impl.width;
+          elem.setAttribute( "class", "video-js vjs-default-skin" );
+          elem.height = impl.height;
+          elem.loop = impl.loop;
+          elem.preload = "auto";
+          elem.autoplay = impl.autoplay;
+          // Seems that videojs needs the controls to always be present
+          elem.controls = true;
+          elem.src = impl.src;
 
-					parent.appendChild( elem );
-				}
+          parent.appendChild( elem );
+        }
 
         _V_( elem ).ready(function() {
           playerReady = true;
 
-					player = this;
+          player = this;
 
-					// If we attempt to change the currentTime before we at pass loadedmetadata
-					// a DOM Exception 11 will be thrown. To be safe lets wait.
-					player.addEvent( "loadedmetadata", function loadedMetaData() {
-						player.removeEvent( "loadedmetadata", loadedMetaData );
-						while ( playerReadyCallbacks.length ) {
-							( playerReadyCallbacks.shift() )();
-						}
-					});
+          // If we attempt to change the currentTime before we at pass loadedmetadata
+          // a DOM Exception 11 will be thrown. To be safe lets wait.
+          player.addEvent( "loadedmetadata", function loadedMetaData() {
+            player.removeEvent( "loadedmetadata", loadedMetaData );
+            while ( playerReadyCallbacks.length ) {
+              ( playerReadyCallbacks.shift() )();
+            }
+          });
         });
 
         playerReadyPromise( function () {
@@ -357,7 +357,7 @@
             }
 
             impl.progressAmount = player.buffered().end();
-            impl.progressAmount = Math.max( impl.progressAmount, player.currentTime );
+            impl.progressAmount = Math.max( impl.progressAmount, player.currentTime() );
 
             setReadyState( self.HAVE_CURRENT_DATA );
 
@@ -473,8 +473,8 @@
     }
 
     function setMuted() {
-    	player.muted( impl.muted );
-    	setVolume();
+      player.muted( impl.muted );
+      setVolume();
     }
 
     function getMuted() {
@@ -485,12 +485,12 @@
       player.currentTime( impl.currentTime );
     }
 
-	  // If the specified container is a video element use it instead of creating another
-		if ( parent.nodeName === "VIDEO" ) {
-			elem = parent;
-			impl.src = elem.src;
-			changeSrc( impl.src );
-		}
+    // If the specified container is a video element use it instead of creating another
+    if ( parent.nodeName === "VIDEO" ) {
+      elem = parent;
+      impl.src = elem.src;
+      changeSrc( impl.src );
+    }
 
     // Namespace all events we'll produce
     self._eventNamespace = Popcorn.guid( "HTMLVideojsVideoElement::" );
@@ -499,7 +499,7 @@
 
     self._util = Popcorn.extend( {}, self._util );
 
-    // Mark type as Videojs 
+    // Mark type as Videojs
     self._util.type = "Videojs";
 
     self.play = function () {
@@ -553,14 +553,14 @@
         }
       },
 
-			controls: {
-		    get: function() {
-					return impl.controls;
-				},
-				set: function( aValue ) {
-					impl.controls = self._util.isAttributeSet( aValue );
-				}
-			},
+      controls: {
+        get: function() {
+          return impl.controls;
+        },
+        set: function( aValue ) {
+          impl.controls = self._util.isAttributeSet( aValue );
+        }
+      },
 
       width: {
         get: function() {
@@ -681,7 +681,8 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLVideojsVideoElement.prototype._canPlaySrc = function( url ) {
-  	return true;
+    var extensionIdx = url.lastIndexOf( "." );
+    return !!document.createElement( "video" ).canPlayType( "video/" + url.substr( extensionIdx + 1, url.length - extensionIdx ) );
   };
 
   // We'll attempt to support a mime type of video/x-videojs
