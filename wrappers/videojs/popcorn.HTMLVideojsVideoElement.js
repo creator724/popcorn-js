@@ -335,14 +335,9 @@
 
           player = this;
 
-          // If we attempt to change the currentTime before we at pass loadedmetadata
-          // a DOM Exception 11 will be thrown. To be safe lets wait.
-          player.addEvent( "loadedmetadata", function loadedMetaData() {
-            player.removeEvent( "loadedmetadata", loadedMetaData );
-            while ( playerReadyCallbacks.length ) {
-              ( playerReadyCallbacks.shift() )();
-            }
-          });
+          while ( playerReadyCallbacks.length ) {
+            ( playerReadyCallbacks.shift() )();
+          }
         });
 
         playerReadyPromise( function () {
