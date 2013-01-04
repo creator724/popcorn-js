@@ -767,6 +767,9 @@
       var extensionIdx = source.lastIndexOf( "." ),
           extension = validVideoTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
 
+      if ( !extension ) {
+        return false;
+      }
       return _V_.html5.canPlaySource( extension ) ? true : _V_.flash.canPlaySource( extension );
     }
   };
