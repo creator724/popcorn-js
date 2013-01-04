@@ -196,7 +196,13 @@
 
       removeEventListeners();
 
-      parent.removeChild( elem );
+      try {
+        player.destroy();
+      } catch (e) {}
+
+      if ( elem && elem.parentNode === parent ) {
+        parent.removeChild( elem );
+      }
       elem = null;
     }
 
@@ -496,6 +502,10 @@
 
     // Mark type as Videojs
     self._util.type = "Videojs";
+
+    self._util.destroy = function () {
+      destroyPlayer();
+    };
 
     self.play = function () {
       function play() {
