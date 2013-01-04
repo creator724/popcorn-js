@@ -532,7 +532,7 @@
       player.currentTime( impl.currentTime );
     }
 
-    if ( window._V_ && typeof parent === "object" && !parent.parentNode ) {
+    if ( window._V_ && parent && typeof parent === "object" && parent.tech ) {
       apiReadyPromise(function() {
         var players = _V_.players;
         // Check if the object we were given matches one of the videojs players
@@ -761,7 +761,9 @@
     if ( Array.isArray( source ) ) {
       for ( var i = 0, l = source.length; i < l && !result; i++ ) {
         result = testVideo( source[ i ].type ) ? "probably" : EMPTY_STRING;
-        break;
+        if ( result ) {
+          break;
+        }
       }
       return result;
     } else if ( typeof source === "object" ) {
