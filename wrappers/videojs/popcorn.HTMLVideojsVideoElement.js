@@ -18,6 +18,23 @@
 
   htmlMode,
 
+  validVideoTypes = {
+    "mp4": {
+      "type": "video/mp4"
+    },
+    "ogv": {
+      "type": "video/ogg"
+    },
+    "webm": {
+      "type": "video/webm"
+    },
+    "m4v": {
+      "type": "videp/m4v"
+    },
+    "x-videojs": {
+      "type": "video/x-videojs"
+    }
+  },
   readyStates = [
     //HAVE_NOTHING = 0
     [ "loadstart" ],
@@ -291,12 +308,18 @@
 
       // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
 
-      impl.src = aSrc;
+      if ( aSrc === parent ) {
+        aSrc = impl.src = parent.tag.src;
+      } else {
+        impl.src = aSrc;
+      }
 
       impl.networkState = self.NETWORK_LOADING;
       setReadyState( self.HAVE_NOTHING );
 
       apiReadyPromise( function() {
+        var sourceElem;
+
         if ( !impl.src ) {
           if ( player ) {
             destroyPlayer();
@@ -314,7 +337,7 @@
           return;
         }
 
-        if ( !elem ) {
+        if ( !elem && !player ) {
           elem = document.createElement( "video" );
 
           elem.width = impl.width;
@@ -325,20 +348,42 @@
           elem.autoplay = impl.autoplay;
           // Seems that videojs needs the controls to always be present
           elem.controls = true;
-          elem.src = impl.src;
+          if ( Array.isArray( impl.src ) ) {
+            for ( var i = 0, l = impl.src.length; i < l; i++ ) {
+              sourceElem = document.createElement( "source" );
+              sourceElem.src = impl.src[ i ].src;
+              sourceElem.type = impl.src[ i ].type;
+              elem.appendChild( sourceElem );
+            }
+          } else if ( typeof impl.src === "object" ) {
+              sourceElem = document.createElement( "source" );
+              sourceElem.src = impl.src.src;
+              sourceElem.type = impl.src.type;
+              elem.appendChild( sourceElem );
+          } else {
+            elem.src = impl.src;
+          }
 
           parent.appendChild( elem );
         }
 
-        _V_( elem ).ready(function() {
-          playerReady = true;
-
-          player = this;
-
+        function fireReadyCallbacks() {
           while ( playerReadyCallbacks.length ) {
             ( playerReadyCallbacks.shift() )();
           }
-        });
+        }
+
+        if ( !player ) {
+          _V_( elem ).ready(function() {
+            playerReady = true;
+
+            player = this;
+            fireReadyCallbacks();
+          });
+        } else {
+          playerReady = true;
+          fireReadyCallbacks();
+        }
 
         playerReadyPromise( function () {
           // set up event listeners
@@ -480,8 +525,32 @@
       player.currentTime( impl.currentTime );
     }
 
+    if ( typeof parent === "object" ) {
+      apiReadyPromise(function() {
+        var players = _V_.players;
+        // Check if the object we were given matches one of the videojs players
+        for ( var prop in players ) {
+          if ( players.hasOwnProperty( prop ) ) {
+            if ( players[ prop ] === parent ) {
+              player = parent;
+              changeSrc( player );
+            }
+          }
+        }
+        if ( !player ) {
+          impl.error = {
+            name: "MediaError",
+            message: "Invalid Videojs Object",
+            // Could use error code 1 here instead ( Aborted )
+            code: window.MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+          };
+          impl.networkState = self.NETWORK_NO_SRC;
+          self.dispatchEvent( "error" );
+          return;
+        }
+      });
     // If the specified container is a video element use it instead of creating another
-    if ( parent.nodeName === "VIDEO" ) {
+    } else if ( parent.nodeName === "VIDEO" ) {
       elem = parent;
       impl.src = elem.src;
       changeSrc( impl.src );
@@ -675,14 +744,30 @@
   HTMLVideojsVideoElement.prototype.constructor = HTMLVideojsVideoElement;
 
   // Helper for identifying URLs we know how to play.
-  HTMLVideojsVideoElement.prototype._canPlaySrc = function( url ) {
-    var extensionIdx = url.lastIndexOf( "." );
-    return !!document.createElement( "video" ).canPlayType( "video/" + url.substr( extensionIdx + 1, url.length - extensionIdx ) );
+  HTMLVideojsVideoElement.prototype._canPlaySrc = function( source ) {
+    // url can be array or obj, make lookup table
+    if ( Array.isArray( source ) ) {
+      var result = false;
+
+      for ( var i = 0, l = source.length; i < l && !result; i++ ) {
+        result = _V_.html5.canPlaySource( source[ i ] ) ? true : _V_.flash.canPlaySource( source[ i ] );
+      }
+      return result;
+    } else if ( typeof source === "object" ) {
+      return _V_.html5.canPlaySource( source ) ? true : _V_.flash.canPlaySource( source );
+    } else {
+      var extensionIdx = source.lastIndexOf( "." ),
+          extension = validVideoTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
+
+      return _V_.html5.canPlaySource( extension ) ? true : _V_.flash.canPlaySource( extension );
+    }
   };
 
   // We'll attempt to support a mime type of video/x-videojs
   HTMLVideojsVideoElement.prototype.canPlayType = function( type ) {
-    return type === "video/x-videojs" ? "probably" : EMPTY_STRING;
+    return type === "video/x-videojs" ||
+           _V_.html5.canPlaySource({ "type": type }) ||
+           _V_.flash.canPlaySource({ "type": type }) ? "probably" : EMPTY_STRING;
   };
 
   Popcorn.HTMLVideojsVideoElement = function( id ) {
