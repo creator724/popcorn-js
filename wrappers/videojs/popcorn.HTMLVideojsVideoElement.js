@@ -14,7 +14,7 @@
   apiScriptElement,
   apiCSS,
   apiReadyCallbacks = [],
-  _V_,
+  _V_ = window._V_ || window.VideoJS,
 
   htmlMode,
 
@@ -53,21 +53,6 @@
   ];
 
   function apiReadyPromise( fn ) {
-    if ( !window._V_ && !apiScriptElement ) {
-      // Insert the VideoJS script and wait for it to fire the callback
-      apiScriptElement = document.createElement( "script" );
-      apiScriptElement.async = true;
-      apiScriptElement.src = (document.location.protocol === 'file:' ? 'http:' : document.location.protocol) + "//vjs.zencdn.net/c/video.js";
-
-      apiCSS = document.createElement( "link" );
-      apiCSS.type = "text/css";
-      apiCSS.rel = "stylesheet";
-      apiCSS.href = ( document.location.protocol === "file:" ? "http:" : document.location.protocol ) + "//vjs.zencdn.net/c/video-js.css";
-
-      document.head.appendChild( apiCSS );
-      document.head.appendChild( apiScriptElement );
-    }
-
     // VideoJS doesn't notify us when the script has loaded so we have to do poll
     // and check for existance of _V_ on the window
     function checkAPIReady() {
@@ -82,14 +67,29 @@
     }
 
     if ( window._V_ ) {
-      _V_ = window._V_;
       fn();
-    } else {
-      if ( !apiReadyCallbacks.length ) {
-      	checkAPIReady();
-      }
-      apiReadyCallbacks.push(fn);
+      return;
     }
+
+    if ( !apiScriptElement ) {
+      // Insert the VideoJS script and wait for it to fire the callback
+      apiScriptElement = document.createElement( "script" );
+      apiScriptElement.async = true;
+      apiScriptElement.src = (document.location.protocol === 'file:' ? 'http:' : document.location.protocol) + "//vjs.zencdn.net/c/video.js";
+
+      apiCSS = document.createElement( "link" );
+      apiCSS.type = "text/css";
+      apiCSS.rel = "stylesheet";
+      apiCSS.href = ( document.location.protocol === "file:" ? "http:" : document.location.protocol ) + "//vjs.zencdn.net/c/video-js.css";
+
+      document.head.appendChild( apiCSS );
+      document.head.appendChild( apiScriptElement );
+    }
+
+    if ( !apiReadyCallbacks.length ) {
+      setTimeout( checkAPIReady, 10 );
+    }
+    apiReadyCallbacks.push(fn);
   }
 
   function HTMLVideojsVideoElement( id ) {
