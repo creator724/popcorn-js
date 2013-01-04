@@ -532,7 +532,7 @@
       player.currentTime( impl.currentTime );
     }
 
-    if ( window._V_ && parent && typeof parent === "object" && parent.tech ) {
+    if ( window._V_ && parent && typeof parent === "object" && parent.techGet ) {
       apiReadyPromise(function() {
         var players = _V_.players;
         // Check if the object we were given matches one of the videojs players
