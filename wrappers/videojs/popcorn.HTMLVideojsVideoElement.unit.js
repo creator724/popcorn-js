@@ -19,16 +19,13 @@ start = function() {
   var wrapper = players[QUnit.config.current.testName];
   delete players[QUnit.config.current.testName];
 
-  setTimeout( function() {
-    qunitStart();
-
-    if (wrapper && wrapper._util && wrapper._util.destroy) {
-      wrapper._util.destroy();
-      return;
-    }
+  if (wrapper && wrapper._util && wrapper._util.destroy) {
+    wrapper._util.destroy();
+  } else {
     var video = document.querySelector( "#video" );
     while( video.hasChildNodes() ) {
       video.removeChild( video.lastChild );
     }
-  }, 500 );
+  }
+  qunitStart();
 };
