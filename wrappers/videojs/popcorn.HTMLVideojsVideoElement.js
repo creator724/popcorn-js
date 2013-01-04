@@ -308,6 +308,10 @@
 
     function changeSrc( aSrc ) {
 
+      if ( aSrc === player ) {
+        return;
+      }
+
       // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#media-element-load-algorithm
 
       destroyPlayer();
