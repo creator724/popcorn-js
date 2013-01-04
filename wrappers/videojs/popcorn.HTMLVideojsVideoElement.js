@@ -210,17 +210,23 @@
       if( !( playerReady && player ) ) {
         return;
       }
-      player.pause();
 
-      removeEventListeners();
+      if ( player !== parent ) {
+        player.pause();
 
-      try {
-        player.destroy();
-      } catch (e) {}
+        removeEventListeners();
 
-      if ( elem && elem.parentNode === parent ) {
-        parent.removeChild( elem );
+        try {
+          player.destroy();
+        } catch (e) {}
+
+        if ( elem && elem.parentNode === parent ) {
+          parent.removeChild( elem );
+        }
       }
+
+      parent = null;
+      playerReady = false;
       elem = null;
     }
 
