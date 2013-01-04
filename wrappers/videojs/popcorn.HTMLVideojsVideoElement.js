@@ -92,6 +92,33 @@
     apiReadyCallbacks.push(fn);
   }
 
+  function findExistingVideoJSPlayer( obj ) {
+    var id, byName, player;
+
+    if ( !_V_ || !obj || !_V_.players ) {
+      return false;
+    }
+
+    byName = typeof obj === 'string';
+    id = byName ? obj : obj.id;
+
+    player = _V_.players[ id ];
+    if ( player && ( byName || obj === player ) ) {
+      return player;
+    }
+
+    if ( typeof obj !== 'object' || typeof obj.techGet !== 'function' ) {
+      return false;
+    }
+
+    for ( id in _V_.players ) {
+      if ( _V_.players.hasOwnProperty( id ) && _V_.players[ id ] === obj ) {
+        return _V_.players[ id ];
+      }
+    }
+    return false;
+  }
+
   function HTMLVideojsVideoElement( id ) {
 
     var self = this,
@@ -119,6 +146,7 @@
         progressAmount: null
       },
       maxReadyState = 0,
+      existingPlayer,
       playEventPending = false,
       playingEventPending = false,
       playerReady = false,
@@ -211,10 +239,10 @@
         return;
       }
 
-      if ( player !== parent ) {
-        player.pause();
+      removeEventListeners();
 
-        removeEventListeners();
+      if ( !existingPlayer ) {
+        player.pause();
 
         try {
           player.destroy();
@@ -225,6 +253,8 @@
         }
       }
 
+      existingPlayer = null;
+      player = null;
       parent = null;
       playerReady = false;
       elem = null;
@@ -321,8 +351,8 @@
 
       // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
 
-      if ( aSrc === parent ) {
-        aSrc = impl.src = parent.tag.src;
+      if ( existingPlayer ) {
+        aSrc = impl.src = existingPlayer.tag.src;
       } else {
         impl.src = aSrc;
       }
@@ -339,7 +369,9 @@
           }
         }
 
-        if ( !self._canPlaySrc( aSrc ) ) {
+        player = existingPlayer;
+
+        if ( !player && !self._canPlaySrc( aSrc ) ) {
           impl.error = {
             name: "MediaError",
             message: "Media Source Not Supported",
@@ -380,23 +412,16 @@
           parent.appendChild( elem );
         }
 
-        function fireReadyCallbacks() {
+        if ( !player ) {
+          player = _V_( elem );
+        }
+        player.ready(function() {
+          playerReady = true;
+
           while ( playerReadyCallbacks.length ) {
             ( playerReadyCallbacks.shift() )();
           }
-        }
-
-        if ( !player ) {
-          _V_( elem ).ready(function() {
-            playerReady = true;
-
-            player = this;
-            fireReadyCallbacks();
-          });
-        } else {
-          playerReady = true;
-          fireReadyCallbacks();
-        }
+        });
 
         playerReadyPromise( function () {
           // set up event listeners
@@ -538,33 +563,12 @@
       player.currentTime( impl.currentTime );
     }
 
-    if ( window._V_ && parent && typeof parent === "object" && parent.techGet ) {
-      apiReadyPromise(function() {
-        var players = _V_.players;
-        // Check if the object we were given matches one of the videojs players
-        for ( var prop in players ) {
-          if ( players.hasOwnProperty( prop ) ) {
-            if ( players[ prop ] === parent ) {
-              player = parent;
-              changeSrc( player );
-              break;
-            }
-          }
-        }
-        if ( !player ) {
-          impl.error = {
-            name: "MediaError",
-            message: "Invalid Videojs Object",
-            // Could use error code 1 here instead ( Aborted )
-            code: window.MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
-          };
-          impl.networkState = self.NETWORK_NO_SRC;
-          self.dispatchEvent( "error" );
-          return;
-        }
-      });
-    // If the specified container is a video element use it instead of creating another
-    } else if ( parent.nodeName === "VIDEO" ) {
+    existingPlayer = findExistingVideoJSPlayer( parent );
+    if ( existingPlayer ) {
+      elem = existingPlayer.el;
+      parent = elem;
+      changeSrc( existingPlayer );
+    } else if ( parent && parent.nodeName === "VIDEO" ) {
       elem = parent;
       impl.src = elem.src;
       changeSrc( impl.src );
