@@ -658,7 +658,6 @@
 
           impl.volume = aValue;
           playerReadyPromise( setVolume, true );
-          self.dispatchEvent( "volumechange" );
         }
       },
 
@@ -669,7 +668,6 @@
         set: function( aValue ) {
           impl.muted = self._util.isAttributeSet( aValue ) && 1 || 0;
           playerReadyPromise( setMuted, true );
-          self.dispatchEvent( "volumechange" );
         }
       },
 
