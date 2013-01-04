@@ -11,7 +11,7 @@
             popcorn;
 
         _V_( "video" ).ready(function() {
-          player = Popcorn.HTMLVideojsVideoElement( this ),
+          player = Popcorn.HTMLVideojsVideoElement( this );
           window.popcorn = popcorn = Popcorn( player );
         });
       }, false);
@@ -22,6 +22,7 @@
       controls preload="auto" width="640" height="264"  
       poster="http://video-js.zencoder.com/oceans-clip.png"  
       <source src="http://video-js.zencoder.com/oceans-clip.mp4" type='video/mp4' />  
+      <source src="http://video-js.zencoder.com/oceans-clip.ogv" type='video/ogg' />  
     </video>
   </body>
 </html>
