@@ -149,7 +149,7 @@
       //no duplicates, just in case
       callback = eventCallbacks[ name ];
       if ( callback ) {
-        player.removeEventListener( name, callback );
+        player.removeEvent( name, callback );
       }
 
       if ( typeof src === 'string' ) {
@@ -185,6 +185,7 @@
     function setReadyState( state ) {
       var i, queue;
 
+      console.log( state, impl.readyState );
       if ( state <= impl.readyState ) {
         return;
       }
@@ -531,7 +532,7 @@
       player.currentTime( impl.currentTime );
     }
 
-    if ( typeof parent === "object" ) {
+    if ( typeof parent === "object" && !parent.parentNode ) {
       apiReadyPromise(function() {
         var players = _V_.players;
         // Check if the object we were given matches one of the videojs players
@@ -753,32 +754,34 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLVideojsVideoElement.prototype._canPlaySrc = function( source ) {
+    var testVideo = document.createElement( "video" ),
+        result;
     // url can be array or obj, make lookup table
     if ( Array.isArray( source ) ) {
-      var result = false;
-
       for ( var i = 0, l = source.length; i < l && !result; i++ ) {
-        result = _V_.html5.canPlaySource( source[ i ] ) ? true : _V_.flash.canPlaySource( source[ i ] );
+        result = testVideo( source[ i ].type ) ? "probably" : EMPTY_STRING;
       }
       return result;
     } else if ( typeof source === "object" ) {
-      return _V_.html5.canPlaySource( source ) ? true : _V_.flash.canPlaySource( source );
+      result = testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
+      return result;
     } else {
       var extensionIdx = source.lastIndexOf( "." ),
           extension = validVideoTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
 
       if ( !extension ) {
-        return false;
+        return EMPTY_STRING;
       }
-      return _V_.html5.canPlaySource( extension ) ? true : _V_.flash.canPlaySource( extension );
+      result = testVideo.canPlayType( extension.type ) ? "probably" : EMPTY_STRING;
+      return result;
     }
   };
 
   // We'll attempt to support a mime type of video/x-videojs
   HTMLVideojsVideoElement.prototype.canPlayType = function( type ) {
-    return type === "video/x-videojs" ||
-           _V_.html5.canPlaySource({ "type": type }) ||
-           _V_.flash.canPlaySource({ "type": type }) ? "probably" : EMPTY_STRING;
+    var testVideo = document.createElement( "video" );
+
+    return type === "video/x-videojs" || video.canPlayType( type ) ? "probably" : EMPTY_STRING;
   };
 
   Popcorn.HTMLVideojsVideoElement = function( id ) {

@@ -2,8 +2,9 @@
 var players = {},
   testData = {
 
-  videoSrc: "http://video-js.zencoder.com/oceans-clip.mp4",
-  expectedDuration: 151,
+  videoSrc: "../../test/trailer.mp4",
+  shortVideoSrc: "http://media.w3.org/2010/05/sintel/trailer.mp4",
+  expectedDuration: 65,
 
   createMedia: function( id ) {
     var wrapper = Popcorn.HTMLVideojsVideoElement( id );
