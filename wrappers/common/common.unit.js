@@ -172,12 +172,10 @@ asyncTest( "T07 - loadedmetadata before loadeddata", 1, function() {
 asyncTest( "T08 - progress event", 1, function() {
 
   var video = testData.createMedia( "#video" );
-  video.play();
 
   video.addEventListener( "progress", function onProgress() {
     video.removeEventListener( "progress", onProgress, false );
     ok( true, "progress event fired" );
-    video.pause();
     start();
   }, false);
 
