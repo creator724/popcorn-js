@@ -213,7 +213,13 @@
 
       removeEventListeners();
 
-      parent.removeChild( elem );
+      try {
+        player.destroy();
+      } catch (e) {}
+
+      if ( elem && elem.parentNode === parent ) {
+        parent.removeChild( elem );
+      }
       elem = null;
     }
 
@@ -566,6 +572,10 @@
     // Mark type as Videojs
     self._util.type = "Videojs";
 
+    self._util.destroy = function () {
+      destroyPlayer();
+    };
+
     self.play = function () {
       function play() {
         player.play();
@@ -717,7 +727,6 @@
 
           impl.volume = aValue;
           playerReadyPromise( setVolume, true );
-          self.dispatchEvent( "volumechange" );
         }
       },
 
@@ -728,7 +737,6 @@
         set: function( aValue ) {
           impl.muted = self._util.isAttributeSet( aValue ) && 1 || 0;
           playerReadyPromise( setMuted, true );
-          self.dispatchEvent( "volumechange" );
         }
       },
 
