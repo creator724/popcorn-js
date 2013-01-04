@@ -541,6 +541,7 @@
             if ( players[ prop ] === parent ) {
               player = parent;
               changeSrc( player );
+              break;
             }
           }
         }
