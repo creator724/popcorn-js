@@ -457,6 +457,10 @@
 
           registerEventListener( "stalled", onStalled );
 
+          registerEventListener( "waiting" );
+          registerEventListener( "ratechange" );
+          registerEventListener( "abort" );
+
           registerEventListener( "timeupdate", "currentTime" );
           registerEventListener( "durationchange", onDurationChange );
 
