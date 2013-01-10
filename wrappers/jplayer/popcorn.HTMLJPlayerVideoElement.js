@@ -7,13 +7,12 @@
 
   EMPTY_STRING = "",
 
-  // YouTube suggests 200x200
-  // as minimum, video spec says 300x150.
-  MIN_WIDTH = 300,
-  MIN_HEIGHT = 200,
+  // The min height for jPlayer seems to be 480x298
+  MIN_WIDTH = 480,
+  MIN_HEIGHT = 298,
   JQUERY_SCRIPT_URL = "//ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js",
   JPLAYER_SCRIPT_URL = "//www.jplayer.org/2.2.0/js/jquery.jplayer.min.js",
-  JPLAYER_SWF_URL = "http://www.jplayer.org/2.2.0/js/",
+  JPLAYER_SWF_URL = "http://www.jplayer.org/2.2.0/js",
   jqueryScriptElement,
   jplayerScriptElement,
   apiReadyCallbacks = [],
@@ -21,21 +20,54 @@
 
   htmlMode,
 
-  validVideoTypes = {
-    "mp4": {
-      "type": "video/mp4"
+  validMediaTypes = {
+    mp3: {
+      codec: 'audio/mpeg; codecs="mp3"',
+      flashCanPlay: true
     },
-    "ogv": {
-      "type": "video/ogg"
+    m4a: { // AAC / MP4
+      codec: 'audio/mp4; codecs="mp4a.40.2"',
+      flashCanPlay: true
     },
-    "webm": {
-      "type": "video/webm"
+    oga: { // OGG
+      codec: 'audio/ogg; codecs="vorbis"',
+      flashCanPlay: false
     },
-    "m4v": {
-      "type": "videp/m4v"
+    wav: { // PCM
+      codec: 'audio/wav; codecs="1"',
+      flashCanPlay: false
     },
-    "x-jplayer": {
-      "type": "video/x-jplayer"
+    webma: { // WEBM
+      codec: 'audio/webm; codecs="vorbis"',
+      flashCanPlay: false
+    },
+    fla: { // FLV / F4A
+      codec: 'audio/x-flv',
+      flashCanPlay: true
+    },
+    rtmpa: { // RTMP AUDIO
+      codec: 'audio/rtmp; codecs="rtmp"',
+      flashCanPlay: true
+    },
+    m4v: { // H.264 / MP4
+      codec: 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+      flashCanPlay: true
+    },
+    ogv: { // OGG
+      codec: 'video/ogg; codecs="theora, vorbis"',
+      flashCanPlay: false
+    },
+    webmv: { // WEBM
+      codec: 'video/webm; codecs="vorbis, vp8"',
+      flashCanPlay: false
+    },
+    flv: { // FLV / F4V
+      codec: 'video/x-flv',
+      flashCanPlay: true
+    },
+    rtmpv: { // RTMP VIDEO
+      codec: 'video/rtmp; codecs="rtmp"',
+      flashCanPlay: true
     }
   },
   readyStates = [
@@ -57,7 +89,7 @@
 
   // Utility function to check if the neccessary APIs have been loaded
   function isJPlayerReady() {
-    return $ && $.jPlayer;
+    return window.$ && window.$.jPlayer;
   }
 
   function apiReadyPromise( fn ) {
@@ -105,33 +137,6 @@
     apiReadyCallbacks.push(fn);
   }
 
-  function findExistingVideoJSPlayer( obj ) {
-    var id, byName, player;
-
-    if ( !isJPlayerReady() || !obj ) {
-      return false;
-    }
-
-    //byName = typeof obj === 'string';
-    //id = byName ? obj : obj.id;
-
-    //player = _V_.players[ id ];
-    //if ( player && ( byName || obj === player ) ) {
-      //return player;
-    //}
-
-    //if ( typeof obj !== 'object' || typeof obj.techGet !== 'function' ) {
-      //return false;
-    //}
-
-    //for ( id in _V_.players ) {
-      //if ( _V_.players.hasOwnProperty( id ) && _V_.players[ id ] === obj ) {
-        //return _V_.players[ id ];
-      //}
-    //}
-    return false;
-  }
-
   function HTMLJPlayerVideoElement( id ) {
 
     var self = this,
@@ -159,11 +164,11 @@
         progressAmount: null
       },
       maxReadyState = 0,
-      existingPlayer,
       playEventPending = false,
       playingEventPending = false,
       playerReady = false,
       player,
+      playerObject,
       playerReadyCallbacks = [],
       stalledTimeout,
       eventCallbacks = {};
@@ -190,12 +195,13 @@
       //no duplicates, just in case
       callback = eventCallbacks[ name ];
       if ( callback ) {
-        player.removeEvent( name, callback );
+        player.off( $.jPlayer.event[ name ], callback );
       }
 
       if ( typeof src === 'string' ) {
         callback = function() {
-          var val = player[ dest || src ];
+          var playerObject = $( this ).data( "jPlayer" ),
+              val = playerObject.status[ dest || src ];
           if ( impl[ src ] !== val ) {
             impl[ src ] = val;
             self.dispatchEvent( name );
@@ -214,12 +220,12 @@
       }
 
       eventCallbacks[ name ] = callback;
-      player.addEvent( name, callback );
+      player.on( $.jPlayer.event[ name ], callback );
     }
 
     function removeEventListeners() {
       Popcorn.forEach( eventCallbacks, function ( name, callback ) {
-        player.removeEvent( name, callback );
+        player.off( $.jPlayer.event[ name ], callback );
       } );
     }
 
@@ -253,23 +259,22 @@
 
       removeEventListeners();
 
-      if ( !existingPlayer ) {
-        player.pause();
+      player.jPlayer( "pause" );
 
-        try {
-          player.jPlayer( "destroy" );
-        } catch (e) {}
-      }
+      try {
+        player.jPlayer( "destroy" );
+      } catch (e) {}
 
-      existingPlayer = null;
       player = null;
+      playerObject = null;
       parent = null;
       playerReady = false;
       elem = null;
     }
 
     function onDurationChange() {
-      impl.duration = player.duration();
+      var playerObject = $( this ).data( "jPlayer" );
+      impl.duration = playerObject.status.duration;
       if ( impl.readyState < self.HAVE_METADATA ) {
         setReadyState( self.HAVE_METADATA );
       } else {
@@ -310,8 +315,13 @@
     }
 
     function updateSize() {
-      player.width( impl.width );
-      player.height( impl.height );
+      var container = playerObject.ancestorJq[ 0 ],
+          video = playerObject.internal.domNode;
+
+      container.style.width = impl.width;
+      video.style.width = impl.width;
+      container.style.height = impl.height;
+      video.style.height = impl.height;
     }
 
     function changeSrc( aSrc ) {
@@ -334,7 +344,7 @@
 
       if ( !impl.paused ) {
         if ( playerReady ) {
-          player.pause();
+          player.jPlayer( "pause" );
         }
         impl.paused = false;
       }
@@ -359,11 +369,7 @@
 
       // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
 
-      if ( existingPlayer ) {
-        aSrc = impl.src = existingPlayer.tag.src;
-      } else {
-        impl.src = aSrc;
-      }
+      impl.src = aSrc;
 
       impl.networkState = self.NETWORK_LOADING;
       setReadyState( self.HAVE_NOTHING );
@@ -376,8 +382,6 @@
             destroyPlayer();
           }
         }
-
-        player = existingPlayer;
 
         if ( !player && !self._canPlaySrc( aSrc ) ) {
           impl.error = {
@@ -417,6 +421,7 @@
 
             playerReady = true;
 
+            playerObject = player.data( "jPlayer" );
             // Since we accept a source in various formats, we need to split them
             // up and create an object the JPlayer can work with
             if ( Array.isArray( impl.src ) ) {
@@ -429,19 +434,24 @@
               srcObj[ srcExtensions ] = impl.src;
             }
 
-            player.jPlayer( "setmedia", srcObj );
+            player.jPlayer( "setMedia", srcObj );
+
+            if ( impl.autoplay ) {
+              player.jPlayer( "play" );
+            }
 
             while ( playerReadyCallbacks.length ) {
               ( playerReadyCallbacks.shift() )();
             }
           },
+          "loop": !!impl.loop,
           "size": {
-            "width": impl.width + "px",
-            "height": impl.height + "px"
+            "width": impl.width,
+            "height": impl.height
           },
           "swfPath": JPLAYER_SWF_URL,
           "solution": "html, flash",
-          "supplied": srcExtensions,
+          "supplied": srcExtensions
         });
 
         playerReadyPromise( function () {
@@ -451,12 +461,13 @@
           monitorStalled();
 
           registerEventListener( "progress", function () {
-            if ( !impl.duration && player.duration() ) {
+            var playerObject = $( this ).data( "jPlayer" );
+            if ( !impl.duration && playerObject.status.duration ) {
               onDurationChange();
             }
 
-            impl.progressAmount = player.buffered().end();
-            impl.progressAmount = Math.max( impl.progressAmount, player.currentTime() );
+            impl.progressAmount = playerObject.status.seekPercent;
+            impl.progressAmount = Math.max( impl.progressAmount, playerObject.status.currentTime );
 
             setReadyState( self.HAVE_CURRENT_DATA );
 
@@ -478,8 +489,9 @@
           registerEventListener( "durationchange", onDurationChange );
 
           registerEventListener( "volumechange", function() {
-            var volume = player.volume(),
-              muted = player.muted();
+            var playerObject = $( this ).data( "jPlayer" ),
+                volume = playerObject.options.volume,
+                muted = playerObject.options.muted;
 
             if ( impl.volume !== volume || impl.muted !== muted ) {
               impl.volume = volume;
@@ -489,7 +501,7 @@
           } );
 
           registerEventListener( "canplay", function () {
-            if ( !impl.duration && player.duration() ) {
+            if ( !impl.duration && playerObject.status.duration ) {
               onDurationChange();
             }
 
@@ -525,7 +537,7 @@
           } );
 
           registerEventListener( "playing", function () {
-            if ( !impl.duration && player.duration() ) {
+            if ( !impl.duration && playerObject.status.duration ) {
               onDurationChange();
             }
 
@@ -563,7 +575,9 @@
     }
 
     function setVolume() {
-      player.volume( impl.muted > 0 ? 0 : impl.volume );
+      player.jPlayer( "unmute" );
+      impl.muted = 0;
+      player.jPlayer( "volume", impl.volume );
     }
 
     function getVolume() {
@@ -572,8 +586,11 @@
     }
 
     function setMuted() {
-      player.muted( impl.muted );
-      setVolume();
+      if ( !impl.muted ) {
+        player.jPlayer( "unmute" );
+      } else {
+        player.jPlayer( "mute" );
+      }
     }
 
     function getMuted() {
@@ -581,12 +598,11 @@
     }
 
     function setCurrentTime() {
-      player.currentTime( impl.currentTime );
-    }
-
-    existingPlayer = findExistingVideoJSPlayer( parent );
-    if ( existingPlayer ) {
-      // TODO Figure out how to handle existing players in jPlayer
+      if ( impl.paused ) {
+        player.jPlayer( "pause", impl.currentTime );
+      } else {
+        player.jPlayer( "play", impl.currentTime );
+      }
     }
 
     // Namespace all events we'll produce
@@ -605,7 +621,8 @@
 
     self.play = function () {
       function play() {
-        player.play();
+        impl.paused = true;
+        player.jPlayer( "play" );
       }
 
       playerReadyPromise(play, true);
@@ -613,7 +630,7 @@
 
     self.pause = function () {
       function pause() {
-        player.pause();
+        player.jPlayer( "pause" );
       }
 
       playerReadyPromise(pause, true);
@@ -685,7 +702,7 @@
 
       currentTime: {
         get: function() {
-          return player && player.currentTime() || 0;
+          return player && playerObject.status.currentTime || 0;
         },
         set: function( aValue ) {
           aValue = parseFloat( aValue );
@@ -781,39 +798,69 @@
   // Helper for identifying URLs we know how to play.
   HTMLJPlayerVideoElement.prototype._canPlaySrc = function( source ) {
     var testVideo = document.createElement( "video" ),
-        result;
+        canPlayHTML,
+        canPlayFlash,
+        extension,
+        // The extension types jPlayer uses seem to be slightly different so lets make
+        // sure we conform to what they are doing.
+        jPlayerExtensions = {
+          "webm": "webmv",
+          "mp4": "m4v",
+          "ogg": "ogv"
+        };
+
+    // Helper function to see if flash supports the media extension
+    function checkFlash( ext ) {
+    }
 
     // url can be array or obj, make lookup table
+    // Try HTML5 audio/video types first, if it can't play, attempt to fallback to flash
     if ( Array.isArray( source ) ) {
       for ( var i = 0, l = source.length; i < l && !result; i++ ) {
-        result = testVideo.canPlayType( source[ i ].type ) ? "probably" : EMPTY_STRING;
-        if ( !result ) {
+        canPlayHTML = testVideo.canPlayType( source[ i ].type ) ? "probably" : EMPTY_STRING;
+        extension = source[ i ].type.split( "/" )[ 0 ];
+        extension = jPlayerExtensions[ extension ] || extension;
+        canPlayFlash = validMediaTypes[ extension ].flashCanPlay;
+
+        if ( canPlayHTML || canPlayFlash ) {
+          srcExtensions += extension + ", ";
           break;
         }
-        srcExtensions += source[ i ].type.split( "/" )[ 0 ] + ", ";
       }
-      if ( !result ) {
-        srcExtensions = "";
-      }
-      return result;
+      return ( canPlayHTML || canPlayFlash );
     } else if ( typeof source === "object" ) {
-      result = testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
-      if ( result ) {
-        srcExtensions = source.type.split( "/" )[ 1 ];
-      }
-      return result;
-    } else {
-      var extensionIdx = source.lastIndexOf( "." ),
-          extension = validVideoTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
+      canPlayHTML = testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
+      extension = source.type.split( "/" )[ 1 ];
+      extension = jPlayerExtensions[ extension ] || extension;
+      canPlayFlash = validMediaTypes[ extension ].flashCanPlay;
 
-      if ( !extension ) {
+      if ( canPlayHTML || canPlayFlash ) {
+        srcExtensions = extension;
+        return "probably";
+      } else {
         return EMPTY_STRING;
       }
-      result = testVideo.canPlayType( extension.type ) ? "probably" : EMPTY_STRING;
-      if ( result ) {
-        srcExtensions = extension.type.split( "/" )[ 1 ];
+    } else {
+      var extensionIdx = source.lastIndexOf( "." ),
+          mediaTypeObj;
+
+      extension = source.substr( extensionIdx + 1, source.length - extensionIdx );
+      extension = jPlayerExtensions[ extension ] || extension;
+      mediaTypeObj = validMediaTypes[ extension ];
+
+      if ( !mediaTypeObj ) {
+        return EMPTY_STRING;
       }
-      return result;
+
+      canPlayHTML = testVideo.canPlayType( mediaTypeObj.codec ) ? "probably" : EMPTY_STRING;
+      canPlayFlash = mediaTypeObj.flashCanPlay;
+
+      if ( canPlayHTML || canPlayFlash ) {
+        srcExtensions = extension;
+        return "probably";
+      } else {
+        return EMPTY_STRING;
+      }
     }
   };
 
