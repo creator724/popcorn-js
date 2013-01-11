@@ -1,6 +1,8 @@
 <html>
   <head>
     <link type="text/css" href="http://jplayer.org/latest/skin/pink.flag/jplayer.pink.flag.css" rel="stylesheet" />
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js"></script>
+    <script src="//www.jplayer.org/2.2.0/js/jquery.jplayer.min.js"></script>
     <script src="../../popcorn.js"></script>
     <script src="../common/popcorn._MediaElementProto.js"></script>
     <script src="popcorn.HTMLJPlayerVideoElement.js"></script>
@@ -9,11 +11,21 @@
         var player,
             popcorn;
 
-          player = Popcorn.HTMLJPlayerVideoElement( "jquery_jplayer_1" );
+          $( "#jquery_jplayer_1" ).jPlayer({
+            "ready": function() {
+              $( this ).jPlayer( "setMedia", {
+                "webmv": "http://video.webmfiles.org/elephants-dream.webm"
+              });
+              player = Popcorn.HTMLJPlayerVideoElement( $( this ) );
+              window.popcorn = popcorn = Popcorn( player );
+            },
+            "solution": "html, flash",
+            "supplied": "webmv"
+          });
+          //player = Popcorn.HTMLJPlayerVideoElement( "jquery_jplayer_1" );
           //player.src = "http://video.webmfiles.org/elephants-dream.webm";
+          //window.popcorn = popcorn = Popcorn( player );
 
-          window.p = player;
-          window.popcorn = popcorn = Popcorn( player );
       }, false);
     </script>
   </head>

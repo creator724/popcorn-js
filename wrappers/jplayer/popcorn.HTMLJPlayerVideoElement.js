@@ -107,6 +107,10 @@
 
     // Utility function to inject the JPlayer script
     function injectJPlayerScript() {
+      if ( !window.$ ) {
+        setTimeout( injectJPlayerScript, 10 );
+        return;
+      }
       jplayerScriptElement = document.createElement( "script" );
       jplayerScriptElement.async = true;
       jplayerScriptElement.src = JPLAYER_SCRIPT_URL;
@@ -137,11 +141,34 @@
     apiReadyCallbacks.push(fn);
   }
 
+  function findExistingPlayer( obj ) {
+    var name,
+        jplayerInstances,
+        instance;
+
+    if ( !isJPlayerReady() ) {
+      return false;
+    }
+
+    jplayerInstances = $.jPlayer.prototype.instances;
+
+    // If they provide the jQuery object associated with the player or the DOM element
+    if ( typeof obj === "object" ) {
+      for ( var player in jplayerInstances ) {
+        instance = jplayerInstances[ player ];
+        if ( obj[ 0 ] === instance[ 0 ] || obj === instance[ 0 ] ) {
+          return instance;
+        }
+      }
+    }
+
+    return false;
+  }
+
   function HTMLJPlayerVideoElement( id ) {
 
     var self = this,
       parent = typeof id === "string" ? Popcorn.dom.find( id ) : id,
-      elem,
       impl = {
         src: EMPTY_STRING,
         networkState: self.NETWORK_EMPTY,
@@ -164,6 +191,7 @@
         progressAmount: null
       },
       maxReadyState = 0,
+      existingPlayer,
       playEventPending = false,
       playingEventPending = false,
       playerReady = false,
@@ -267,9 +295,9 @@
 
       player = null;
       playerObject = null;
+      existingPlayer = null;
       parent = null;
       playerReady = false;
-      elem = null;
     }
 
     function onDurationChange() {
@@ -369,14 +397,16 @@
 
       // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
 
-      impl.src = aSrc;
+      if ( typeof aSrc === "object" && aSrc[ 0 ] === player[ 0 ] ) {
+        impl.src = player.data( "jPlayer" ).status.src;
+      } else {
+        impl.src = aSrc;
+      }
 
       impl.networkState = self.NETWORK_LOADING;
       setReadyState( self.HAVE_NOTHING );
 
       apiReadyPromise( function() {
-        var sourceElem;
-
         if ( !impl.src ) {
           if ( player ) {
             destroyPlayer();
@@ -394,24 +424,16 @@
           return;
         }
 
-        if ( !elem ) {
-          /*elem = document.createElement( "video" );
-
-          elem.width = impl.width;
-          elem.setAttribute( "class", "video-js vjs-default-skin" );
-          elem.height = impl.height;
-          elem.loop = impl.loop;
-          elem.preload = "auto";
-          elem.autoplay = impl.autoplay;
-          // Seems that videojs needs the controls to always be present
-          elem.controls = true;
-
-          parent.appendChild( elem );*/
-        }
-
         // Since everything is done using jQuery in jPlayer, we will make our player === elem
         if ( !player ) {
           player = $( parent );
+        } else {
+          playerReady = true;
+          playerObject = player.data( "jPlayer" );
+
+          while ( playerReadyCallbacks.length ) {
+            ( playerReadyCallbacks.shift() )();
+          }
         }
 
         player.jPlayer({
@@ -605,6 +627,13 @@
       }
     }
 
+    existingPlayer = findExistingPlayer( parent );
+
+    if ( existingPlayer ) {
+      player = existingPlayer;
+      changeSrc( existingPlayer );
+    }
+
     // Namespace all events we'll produce
     self._eventNamespace = Popcorn.guid( "HTMLJPlayerVideoElement::" );
 
@@ -682,7 +711,7 @@
 
       width: {
         get: function() {
-          return elem && elem.width || impl.width;
+          return player && player.width() || impl.width;
         },
         set: function( aValue ) {
           impl.width = aValue;
@@ -692,7 +721,7 @@
 
       height: {
         get: function() {
-          return elem && elem.height || impl.height;
+          return player && player.height() || impl.height;
         },
         set: function( aValue ) {
           impl.height = aValue;
@@ -864,16 +893,24 @@
     }
   };
 
-  // We'll attempt to support a mime type of video/x-videojs
   HTMLJPlayerVideoElement.prototype.canPlayType = function( type ) {
-    var testVideo = document.createElement( "video" );
+    var testVideo = document.createElement( "video" ),
+        canPlay = false;
 
-    return type === "video/x-videojs" || video.canPlayType( type ) ? "probably" : EMPTY_STRING;
+    for ( var extension in validMediaTypes ) {
+      if ( validMediaTypes[ extension ].codec === type ) {
+        canPlay = true;
+        break;
+      }
+    }
+
+    return video.canPlayType( type ) || canPlay ? "probably" : EMPTY_STRING;
   };
 
   Popcorn.HTMLJPlayerVideoElement = function( id ) {
     return new HTMLJPlayerVideoElement( id );
   };
+
   Popcorn.HTMLJPlayerVideoElement._canPlaySrc = HTMLJPlayerVideoElement.prototype._canPlaySrc;
 
 }( this, this.Popcorn ));
