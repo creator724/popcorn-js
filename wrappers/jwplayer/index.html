@@ -1,0 +1,27 @@
+<html>
+  <head>
+    <script src="../../popcorn.js"></script>
+    <script src="../common/popcorn._MediaElementProto.js"></script>
+    <script src="popcorn.HTMLJWPlayerVideoElement.js"></script>
+    <script>
+      document.addEventListener( "DOMContentLoaded", function() {
+        var player,
+            popcorn;
+
+        player = Popcorn.HTMLJWPlayerVideoElement( "video" );
+        player.src = "http://video-js.zencoder.com/oceans-clip.mp4";
+
+        window.popcorn = popcorn = Popcorn( player );
+      }, false);
+    </script>
+  </head>
+  <body>
+    <div id="video"></div>
+    <!--<video id="video" class="video-js vjs-default-skin"  -->
+      <!--controls preload="auto" width="640" height="264"  -->
+      <!--poster="http://video-js.zencoder.com/oceans-clip.png"  -->
+      <!--<source src="http://video-js.zencoder.com/oceans-clip.mp4" type='video/mp4' />  -->
+      <!--<source src="http://video-js.zencoder.com/oceans-clip.ogv" type='video/ogg' />  -->
+    <!--</video>-->
+  </body>
+</html>
