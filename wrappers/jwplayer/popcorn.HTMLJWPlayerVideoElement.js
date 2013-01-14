@@ -228,7 +228,7 @@
       }
 
       eventCallbacks[ name ] = callback;
-      player.addEvent( name, callback );
+      player[ name ]( callback );
     }
 
     function removeEventListeners() {
@@ -437,21 +437,23 @@
         if ( !player ) {
           player = jwplayer( parent );
         }
+
         player.setup({
-          "file": impl.src
-        });
+          "file": impl.src,
+          "events": {
+            "onReady": function( event ) {
+              playerReady = true;
 
-        player.onReady(function() {
-          playerReady = true;
-
-          console.log( "COOL" );
-          while ( playerReadyCallbacks.length ) {
-            ( playerReadyCallbacks.shift() )();
+              while ( playerReadyCallbacks.length ) {
+                ( playerReadyCallbacks.shift() )();
+              }
+            }
           }
         });
+
         playerReadyPromise( function () {
           // set up event listeners
-          registerEventListener( "error" );
+          registerEventListener( "onError" );
 
           monitorStalled();
 
@@ -479,10 +481,10 @@
 
           registerEventListener( "stalled", onStalled );
 
-          registerEventListener( "timeupdate", "currentTime" );
-          registerEventListener( "durationchange", onDurationChange );
+          registerEventListener( "onTime", "currentTime" );
+          registerEventListener( "onDuration", onDurationChange );
 
-          registerEventListener( "volumechange", function() {
+          registerEventListener( "onVolume", function() {
             var volume = player.volume(),
               muted = player.muted();
 
@@ -506,7 +508,7 @@
             setReadyState( self.HAVE_ENOUGH_DATA );
           } );
 
-          registerEventListener( "play", function () {
+          registerEventListener( "onPlay", function () {
             if ( impl.paused ) {
               impl.paused = false;
               if ( !impl.duration) {
@@ -549,7 +551,7 @@
             return true;
           } );
 
-          registerEventListener( "pause", function () {
+          registerEventListener( "onPause", function () {
             if ( !impl.paused ) {
               //if ( impl.loop && player.currentTime >= impl.duration ) {
               //  return false;
