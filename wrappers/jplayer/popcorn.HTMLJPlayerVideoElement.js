@@ -17,8 +17,7 @@
   jplayerScriptElement,
   apiReadyCallbacks = [],
   srcExtensions = "",
-
-  htmlMode,
+  jPlayer,
 
   validMediaTypes = {
     mp3: {
@@ -89,7 +88,11 @@
 
   // Utility function to check if the neccessary APIs have been loaded
   function isJPlayerReady() {
-    return window.$ && window.$.jPlayer;
+    if ( ( window.$ || window.jQuery ) && ( window.$.jPlayer || window.jQuery.jPlayer ) ) {
+      jPlayer = window.jQuery.jPlayer;
+      return true;
+    }
+    return false;
   }
 
   function apiReadyPromise( fn ) {
@@ -107,7 +110,7 @@
 
     // Utility function to inject the JPlayer script
     function injectJPlayerScript() {
-      if ( !window.$ ) {
+      if ( !window.$ || !window.jQuery ) {
         setTimeout( injectJPlayerScript, 10 );
         return;
       }
@@ -116,9 +119,11 @@
       jplayerScriptElement.src = JPLAYER_SCRIPT_URL;
 
       document.head.appendChild( jplayerScriptElement );
+      jPlayer = window.jQuery.jPlayer;
     }
 
     if ( isJPlayerReady() ) {
+      jPlayer = window.jQuery.jPlayer;
       fn();
       return;
     }
@@ -142,27 +147,15 @@
   }
 
   function findExistingPlayer( obj ) {
-    var name,
-        jplayerInstances,
-        instance;
-
-    if ( !isJPlayerReady() ) {
+    if ( !isJPlayerReady() || typeof obj === "string" ) {
       return false;
     }
 
-    jplayerInstances = $.jPlayer.prototype.instances;
+    obj = $( obj );
 
-    // If they provide the jQuery object associated with the player or the DOM element
-    if ( typeof obj === "object" ) {
-      for ( var player in jplayerInstances ) {
-        instance = jplayerInstances[ player ];
-        if ( obj[ 0 ] === instance[ 0 ] || obj === instance[ 0 ] ) {
-          return instance;
-        }
-      }
-    }
-
-    return false;
+    return obj.data &&
+           obj.data( "jPlayer" ) &&
+           jPlayer.prototype.instances[ obj.data( 'jPlayer' ).internal.instance ];
   }
 
   function HTMLJPlayerVideoElement( id ) {
@@ -223,7 +216,7 @@
       //no duplicates, just in case
       callback = eventCallbacks[ name ];
       if ( callback ) {
-        player.off( $.jPlayer.event[ name ], callback );
+        player.off( jPlayer.event[ name ], callback );
       }
 
       if ( typeof src === 'string' ) {
@@ -248,12 +241,12 @@
       }
 
       eventCallbacks[ name ] = callback;
-      player.on( $.jPlayer.event[ name ], callback );
+      player.on( jPlayer.event[ name ], callback );
     }
 
     function removeEventListeners() {
       Popcorn.forEach( eventCallbacks, function ( name, callback ) {
-        player.off( $.jPlayer.event[ name ], callback );
+        player.off( jPlayer.event[ name ], callback );
       } );
     }
 
@@ -287,11 +280,14 @@
 
       removeEventListeners();
 
-      player.jPlayer( "pause" );
 
-      try {
-        player.jPlayer( "destroy" );
-      } catch (e) {}
+      if ( !existingPlayer ) {
+        player.jPlayer( "pause" );
+
+        try {
+          player.jPlayer( "destroy" );
+        } catch (e) {}
+      }
 
       player = null;
       playerObject = null;
@@ -301,8 +297,14 @@
     }
 
     function onDurationChange() {
-      var playerObject = $( this ).data( "jPlayer" );
-      impl.duration = playerObject.status.duration;
+      var po;
+      if ( this.status ) {
+        po = this;
+      } else {
+        po = $( this ).data( "jPlayer" );
+      }
+
+      impl.duration = po.status.duration;
       if ( impl.readyState < self.HAVE_METADATA ) {
         setReadyState( self.HAVE_METADATA );
       } else {
@@ -354,9 +356,14 @@
 
     function changeSrc( aSrc ) {
 
+      function isJPlayerObject() {
+        return isJPlayerReady() && typeof aSrc === "object" && jPlayer.prototype.instances[ aSrc.data( "jPlayer" ).internal.instance ];
+      }
       // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#media-element-load-algorithm
 
-      destroyPlayer();
+      if ( !isJPlayerObject() ) {
+        destroyPlayer();
+      }
 
       impl.readyState = -1;
       maxReadyState = -1;
@@ -397,7 +404,7 @@
 
       // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
 
-      if ( typeof aSrc === "object" && aSrc[ 0 ] === player[ 0 ] ) {
+      if ( isJPlayerObject() ) {
         impl.src = player.data( "jPlayer" ).status.src;
       } else {
         impl.src = aSrc;
@@ -436,6 +443,10 @@
           }
         }
 
+        player.css({
+          "position": "relative"
+        });
+
         player.jPlayer({
           "ready": function() {
             var srcObj = {},
@@ -448,7 +459,7 @@
             // up and create an object the JPlayer can work with
             if ( Array.isArray( impl.src ) ) {
               for ( var i = 0, l = impl.src.length; i < l; i++ ) {
-                srcObj[ exntensions[ i ] ] = impl.src[ i ].src;
+                srcObj[ extensions[ i ] ] = impl.src[ i ].src;
               }
             } else if ( typeof impl.src === "object" ) {
                 srcObj[ srcExtensions ] = impl.src.src;
@@ -485,7 +496,7 @@
           registerEventListener( "progress", function () {
             var playerObject = $( this ).data( "jPlayer" );
             if ( !impl.duration && playerObject.status.duration ) {
-              onDurationChange();
+              onDurationChange.call( playerObject );
             }
 
             impl.progressAmount = playerObject.status.seekPercent;
@@ -524,7 +535,7 @@
 
           registerEventListener( "canplay", function () {
             if ( !impl.duration && playerObject.status.duration ) {
-              onDurationChange();
+              onDurationChange.call( playerObject );
             }
 
             setReadyState( self.HAVE_CURRENT_DATA );
@@ -560,7 +571,7 @@
 
           registerEventListener( "playing", function () {
             if ( !impl.duration && playerObject.status.duration ) {
-              onDurationChange();
+              onDurationChange.call( playerObject );
             }
 
             if ( !impl.duration ) {
@@ -826,10 +837,18 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLJPlayerVideoElement.prototype._canPlaySrc = function( source ) {
+    if ( findExistingPlayer( source ) ) {
+      return "probably";
+    }
+
     var testVideo = document.createElement( "video" ),
         canPlayHTML,
         canPlayFlash,
         extension,
+        extensionIdx,
+        mediaTypeObj,
+        i,
+        l,
         // The extension types jPlayer uses seem to be slightly different so lets make
         // sure we conform to what they are doing.
         jPlayerExtensions = {
@@ -838,14 +857,10 @@
           "ogg": "ogv"
         };
 
-    // Helper function to see if flash supports the media extension
-    function checkFlash( ext ) {
-    }
-
     // url can be array or obj, make lookup table
     // Try HTML5 audio/video types first, if it can't play, attempt to fallback to flash
     if ( Array.isArray( source ) ) {
-      for ( var i = 0, l = source.length; i < l && !result; i++ ) {
+      for ( i = 0, l = source.length; i < l; i++ ) {
         canPlayHTML = testVideo.canPlayType( source[ i ].type ) ? "probably" : EMPTY_STRING;
         extension = source[ i ].type.split( "/" )[ 0 ];
         extension = jPlayerExtensions[ extension ] || extension;
@@ -858,6 +873,9 @@
       }
       return ( canPlayHTML || canPlayFlash );
     } else if ( typeof source === "object" ) {
+      if ( !source.type || typeof source.type !== "string" ) {
+        return EMPTY_STRING;
+      }
       canPlayHTML = testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
       extension = source.type.split( "/" )[ 1 ];
       extension = jPlayerExtensions[ extension ] || extension;
@@ -869,9 +887,8 @@
       } else {
         return EMPTY_STRING;
       }
-    } else {
-      var extensionIdx = source.lastIndexOf( "." ),
-          mediaTypeObj;
+    } else if ( typeof source === "string" ) {
+      extensionIdx = source.lastIndexOf( "." );
 
       extension = source.substr( extensionIdx + 1, source.length - extensionIdx );
       extension = jPlayerExtensions[ extension ] || extension;
@@ -890,21 +907,24 @@
       } else {
         return EMPTY_STRING;
       }
+    } else {
+      return EMPTY_STRING;
     }
   };
 
   HTMLJPlayerVideoElement.prototype.canPlayType = function( type ) {
     var testVideo = document.createElement( "video" ),
-        canPlay = false;
+        canPlay = false,
+        extension;
 
-    for ( var extension in validMediaTypes ) {
+    for ( extension in validMediaTypes ) {
       if ( validMediaTypes[ extension ].codec === type ) {
         canPlay = true;
         break;
       }
     }
 
-    return video.canPlayType( type ) || canPlay ? "probably" : EMPTY_STRING;
+    return testVideo.canPlayType( type ) || canPlay ? "probably" : EMPTY_STRING;
   };
 
   Popcorn.HTMLJPlayerVideoElement = function( id ) {
