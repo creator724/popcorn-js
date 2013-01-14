@@ -1,9 +1,12 @@
 (function( Popcorn, window, document ) {
 
+  "use strict";
+
   var
 
   CURRENT_TIME_MONITOR_MS = 10,
   EMPTY_STRING = "",
+  MediaError = window.MediaError,
 
   // YouTube suggests 200x200 as minimum, video spec says 300x150.
   MIN_WIDTH = 300,
@@ -11,17 +14,44 @@
 
   // Example: http://www.youtube.com/watch?v=12345678901
   regexYouTube = /^.*(?:\/|v=)(.{11})/,
+  regexYouTubeEmbed = /^https?:\/\/(?:www\.)?youtube\.com\/embed\/([A-Z0-9\-]+)($|\?.*)/i,
 
   ABS = Math.abs,
 
   // Setup for YouTube API
-  ytReady = false,
-  ytLoaded = false,
+  ytReady = window.YT && window.YT.Player,
+  ytLoaded = window.YT,
   ytCallbacks = [];
 
   function isYouTubeReady() {
+    function onYouTubeIframeAPIReady() {
+      ytReady = true;
+      var i = ytCallbacks.length;
+      while( i-- ) {
+        ytCallbacks[ i ]();
+        delete ytCallbacks[ i ];
+      }
+    }
+
+    var oldReady = window.onYouTubeIframeAPIReady;
+
+    if ( !ytReady ) {
+      if ( window.YT && window.YT.Player ) {
+        ytReady = true;
+        onYouTubeIframeAPIReady();
+        return true;
+      }
+
+      window.onYouTubeIframeAPIReady = function () {
+        if ( oldReady && typeof oldReady === "function" ) {
+          oldReady();
+        }
+        onYouTubeIframeAPIReady();
+      };
+    }
+
     // If the YouTube iframe API isn't injected, to it now.
-    if( !ytLoaded ) {
+    if( !ytLoaded && !window.YT ) {
       var tag = document.createElement( "script" );
       var protocol = window.location.protocol === "file:" ? "http:" : "";
 
@@ -37,20 +67,48 @@
     ytCallbacks.unshift( callback );
   }
 
-  // An existing YouTube references can break us.
-  // Remove it and use the one we can trust.
-  if ( window.YT ) {
-    window.quarantineYT = window.YT;
-    window.YT = null;
+  // like instanceof, but it will work on elements that come from different windows (e.g. iframes)
+  function instanceOfElement (element, proto) {
+      var result;
+      if (!element || typeof element !== "object") {
+          return false;
+      }
+
+      if (!proto) {
+          proto = "Element";
+      } else if (typeof proto !== "string") {
+          return element instanceof proto;
+      }
+
+      if (element instanceof window[proto]) {
+          return true;
+      }
+
+      if (!element.ownerDocument || !element.ownerDocument.defaultView) {
+          return false;
+      }
+
+      result = (element instanceof element.ownerDocument.defaultView[proto]);
+      return result;
+  }
+
+  function findExistingPlayer( obj ) {
+    if ( instanceOfElement( obj, "HTMLIFrameElement" ) ) {
+      if ( obj.src && regexYouTubeEmbed.test( obj.src ) ) {
+        return obj;
+      }
+    }
+
+    if ( !window.YT || !obj || !window.YT.Player ) {
+      return false;
+    }
+
+    if ( obj instanceof window.YT.Player ) {
+      return obj;
+    }
   }
 
   window.onYouTubeIframeAPIReady = function() {
-    ytReady = true;
-    var i = ytCallbacks.length;
-    while( i-- ) {
-      ytCallbacks[ i ]();
-      delete ytCallbacks[ i ];
-    }
   };
 
   function HTMLYouTubeVideoElement( id ) {
@@ -63,6 +121,7 @@
     var self = this,
       parent = typeof id === "string" ? document.querySelector( id ) : id,
       elem,
+      iframe,
       impl = {
         src: EMPTY_STRING,
         networkState: self.NETWORK_EMPTY,
@@ -85,6 +144,7 @@
       },
       playerReady = false,
       player,
+      existingPlayer,
       playerReadyCallbacks = [],
       metadataReadyCallbacks = [],
       playerState = -1,
@@ -99,14 +159,6 @@
       timeUpdateInterval,
       forcedLoadMetadata = false;
 
-    // Namespace all events we'll produce
-    self._eventNamespace = Popcorn.guid( "HTMLYouTubeVideoElement::" );
-
-    self.parentNode = parent;
-
-    // Mark this as YouTube
-    self._util.type = "YouTube";
-
     function addPlayerReadyCallback( callback ) {
       if ( playerReadyCallbacks.indexOf( callback ) < 0 ) {
         playerReadyCallbacks.unshift( callback );
@@ -120,7 +172,8 @@
     }
 
     function onPlayerReady( event ) {
-      if ( player === event.target ) {
+      var fn;
+      if ( !event || player === event.target ) {
         playerReady = true;
         while( playerReadyCallbacks.length ) {
           fn = playerReadyCallbacks.pop();
@@ -181,6 +234,7 @@
         case 5:
           err.message = "The requested content cannot be played in an HTML5 player or another error related to the HTML5 player has occurred.";
           err.code = MediaError.MEDIA_ERR_DECODE;
+          break;
 
         // requested video not found
         case 100:
@@ -276,7 +330,7 @@
       playerState = event.data;
     }
 
-    function onPlaybackQualityChange ( event ) {
+    function onPlaybackQualityChange() {
       self.dispatchEvent( "playbackqualitychange" );
     }
 
@@ -292,9 +346,28 @@
         delete stateMonitors[i];
       });
 
-      player.stopVideo();
-      if ( player.clearVideo ) {
+      //don't destroy existing player
+      if ( existingPlayer ) {
+        return;
+      }
+
+      try {
+        player.stopVideo();
+      } catch (stopError) {
+      }
+
+      try {
         player.clearVideo();
+      } catch (clearError) {
+      }
+
+      //really destroy iframe
+      if (iframe) {
+        iframe.src = '';
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+        iframe = null;
       }
 
       if ( elem && elem.parentNode ) {
@@ -304,6 +377,13 @@
     }
 
     function changeSrc( aSrc ) {
+      var playerVars,
+          match, newPlayer = true;
+
+      if ( aSrc === player ) {
+        return;
+      }
+
       if( !self._canPlaySrc( aSrc ) ) {
         impl.error = {
           name: "MediaError",
@@ -326,66 +406,113 @@
         destroyPlayer();
       }
 
-      elem = document.createElement( "div" );
-      elem.width = impl.width;
-      elem.height = impl.height;
-      parent.appendChild( elem );
-
-      // Use any player vars passed on the URL
-      var playerVars = self._util.parseUri( aSrc ).queryKey;
-
-      // Remove the video id, since we don't want to pass it
-      delete playerVars.v;
-
-      // Sync autoplay, but manage internally
-      impl.autoplay = playerVars.autoplay === "1" || impl.autoplay;
-      delete playerVars.autoplay;
-
-      // Sync loop, but manage internally
-      impl.loop = playerVars.loop === "1" || impl.loop;
-      delete playerVars.loop;
-
-      // Don't show related videos when ending
-      playerVars.rel = playerVars.rel || 0;
-
-      // Don't show YouTube's branding
-      playerVars.modestbranding = playerVars.modestbranding || 1;
-
-      // Don't show annotations by default
-      playerVars.iv_load_policy = playerVars.iv_load_policy || 3;
-
-      // Don't show video info before playing
-      playerVars.showinfo = playerVars.showinfo || 0;
-
-      // Specify our domain as origin for iframe security
-      var domain = window.location.protocol === "file:" ? "*" :
-        window.location.protocol + "//" + window.location.host;
-      playerVars.origin = playerVars.origin || domain;
-
-      // Show/hide controls. Sync with impl.controls and prefer URL value.
-      playerVars.controls = playerVars.controls || impl.controls ? 2 : 0;
-      impl.controls = playerVars.controls;
-
-      // Get video ID out of youtube url
-      aSrc = regexYouTube.exec( aSrc )[ 1 ];
-
-      player = new YT.Player( elem, {
-        width: impl.width,
-        height: impl.height,
-        videoId: aSrc,
-        playerVars: playerVars,
-        events: {
-          'onReady': onPlayerReady,
-          'onError': onPlayerError,
-          'onStateChange': onPlayerStateChange,
-          'onPlaybackQualityChange': onPlaybackQualityChange,
-        }
-      });
-
       playerReady = false;
       impl.networkState = self.NETWORK_LOADING;
       self.dispatchEvent( "loadstart" );
       self.dispatchEvent( "progress" );
+
+      if ( existingPlayer ) {
+        if ( instanceOfElement( existingPlayer, "HTMLIFrameElement" ) ) {
+          iframe = existingPlayer;
+          match = regexYouTubeEmbed.exec( iframe.src );
+          if ( player ) {
+            newPlayer = false;
+          } else {
+            player = new window.YT.Player( iframe );
+            aSrc = match[1];
+            impl.src = (window.location.protocol === "file:" ? "http:" : window.location.protocol) + "//www.youtube.com/watch?v=" + aSrc;
+          }
+
+          //impl.src = getVideoUrl
+          impl.width = parseFloat(iframe.width) || iframe.offsetWidth;
+          impl.height = parseFloat(iframe.height) || iframe.offsetHeight;
+        } else {
+          if ( player ) {
+            newPlayer = false;
+          } else {
+            player = existingPlayer;
+          }
+          iframe = player.getIframe();
+        }
+
+        if ( player.getPlayerState ) {
+          playerReady = true;
+          onPlayerReady();
+        } else if ( newPlayer ) {
+          player.addEventListener( "onReady", onPlayerReady );
+        }
+
+        if ( newPlayer ) {
+          player.addEventListener( "onError", onPlayerError );
+          player.addEventListener( "onStateChange", onPlayerStateChange );
+          player.addEventListener( "onPlaybackQualityChange", onPlaybackQualityChange );
+        } else if ( typeof aSrc === "string" ) {
+          if ( playerReady ) {
+            player.loadVideoById( aSrc );
+          } else {
+            addPlayerReadyCallback( function() {
+              player.loadVideoById( aSrc );
+            } );
+          }
+        }
+
+      } else {
+        elem = document.createElement( "div" );
+        parent.appendChild( elem );
+
+        // Use any player vars passed on the URL
+        playerVars = self._util.parseUri( aSrc ).queryKey;
+
+        // Remove the video id, since we don't want to pass it
+        delete playerVars.v;
+
+        // Sync autoplay, but manage internally
+        impl.autoplay = playerVars.autoplay === "1" || impl.autoplay;
+        delete playerVars.autoplay;
+
+        // Sync loop, but manage internally
+        impl.loop = playerVars.loop === "1" || impl.loop;
+        delete playerVars.loop;
+
+        // Don't show related videos when ending
+        playerVars.rel = playerVars.rel || 0;
+
+        // Don't show YouTube's branding
+        playerVars.modestbranding = playerVars.modestbranding || 1;
+
+        // Don't show annotations by default
+        playerVars.iv_load_policy = playerVars.iv_load_policy || 3;
+
+        // Don't show video info before playing
+        playerVars.showinfo = playerVars.showinfo || 0;
+
+        // Specify our domain as origin for iframe security
+        var domain = window.location.protocol === "file:" ? "*" :
+          window.location.protocol + "//" + window.location.host;
+        playerVars.origin = playerVars.origin || domain;
+
+        // Show/hide controls. Sync with impl.controls and prefer URL value.
+        playerVars.controls = playerVars.controls || impl.controls ? 2 : 0;
+        impl.controls = playerVars.controls;
+
+        // Get video ID out of youtube url
+        aSrc = regexYouTube.exec( aSrc )[ 1 ];
+
+        player = new YT.Player( elem, {
+          width: impl.width,
+          height: impl.height,
+          videoId: aSrc,
+          playerVars: playerVars,
+          events: {
+            'onReady': onPlayerReady,
+            'onError': onPlayerError,
+            'onStateChange': onPlayerStateChange,
+            'onPlaybackQualityChange': onPlaybackQualityChange
+          }
+        });
+
+        iframe = parent.lastChild;
+      }
 
       // Queue a get duration call so we'll have duration info
       // and can dispatch durationchange.
@@ -526,7 +653,7 @@
       // no need to force it from now on.
       forcedLoadMetadata = true;
 
-      if( impl.ended ) {
+      if( impl.ended && player.getCurrentTime() >= getDuration() ) {
         changeCurrentTime( 0 );
       }
 
@@ -560,27 +687,11 @@
       self.dispatchEvent( "progress" );
     }
 
-    self.play = function() {
-      if( !playerReady ) {
-        addMetadataReadyCallback( function() { self.play(); } );
-        return;
-      }
-      player.playVideo();
-    };
-
     function onPause() {
       impl.paused = true;
       clearInterval( timeUpdateInterval );
       self.dispatchEvent( "pause" );
     }
-
-    self.pause = function() {
-      if( !playerReady ) {
-        addMetadataReadyCallback( function() { self.pause(); } );
-        return;
-      }
-      player.pauseVideo();
-    };
 
     function onEnded() {
       if( impl.loop ) {
@@ -606,7 +717,7 @@
 
     function getVolume() {
       if( !playerReady ) {
-        return impl.volume > -1 ? impl.volume : 1;
+        return impl.volume > -1 ? impl.volume : 100;
       }
       return player.getVolume();
     }
@@ -629,6 +740,37 @@
     function updateSize() {
       player.setSize( impl.width, impl.height );
     }
+
+    // Namespace all events we'll produce
+    self._eventNamespace = Popcorn.guid( "HTMLYouTubeVideoElement::" );
+
+    self.parentNode = parent;
+
+    //so the original doesn't get modified
+    self._util = Popcorn.extend( {}, self._util );
+
+    // Mark this as YouTube
+    self._util.type = "YouTube";
+
+    self._util.destroy = function () {
+      destroyPlayer();
+    };
+
+    self.play = function() {
+      if( !playerReady ) {
+        addMetadataReadyCallback( function() { self.play(); } );
+        return;
+      }
+      player.playVideo();
+    };
+
+    self.pause = function() {
+      if( !playerReady ) {
+        addMetadataReadyCallback( function() { self.pause(); } );
+        return;
+      }
+      player.pauseVideo();
+    };
 
     Object.defineProperties( self, {
 
@@ -663,13 +805,10 @@
 
       width: {
         get: function() {
-          return elem && elem.width || impl.width;
+          return impl.width || iframe && iframe.width;
         },
         set: function( aValue ) {
           impl.width = aValue;
-          if (elem) {
-            elem.width = aValue;
-          }
 
           if( playerReady ) {
               player.setSize( impl.width, impl.height );
@@ -681,13 +820,10 @@
 
       height: {
         get: function() {
-          return elem && elem.height || impl.height;
+          return impl.height || iframe && iframe.height;
         },
         set: function( aValue ) {
           impl.height = aValue;
-          if (elem) {
-            elem.height = aValue;
-          }
 
           if( playerReady ) {
               player.setSize( impl.width, impl.height );
@@ -835,6 +971,11 @@
       return playerReady && player.getAvailableQualityLevels() || [];
     };
 
+    existingPlayer = findExistingPlayer( parent );
+    if ( existingPlayer ) {
+      changeSrc( existingPlayer );
+    }
+
   }
 
   HTMLYouTubeVideoElement.prototype = new Popcorn._MediaElementProto();
@@ -842,7 +983,7 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLYouTubeVideoElement.prototype._canPlaySrc = function( url ) {
-    return (/(?:http:\/\/www\.|http:\/\/|www\.|\.|^)(youtu)/).test( url ) ?
+    return ( findExistingPlayer( url ) || (/(?:http:\/\/www\.|http:\/\/|www\.|\.|^)(youtu)/).test( url ) ) ?
       "probably" :
       EMPTY_STRING;
   };
