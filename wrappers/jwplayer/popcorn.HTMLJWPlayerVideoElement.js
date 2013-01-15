@@ -11,18 +11,19 @@
   // as minimum, video spec says 300x150.
   MIN_WIDTH = 300,
   MIN_HEIGHT = 200,
-  apiScriptElement,
+  apiScriptElement1,
+  apiScriptElement2,
   JWPLAYER_API_URL = "//www.longtailvideo.com/jwplayer/jwplayer.js",
   JWPLAYER_HTML5_URL = "http://www.longtailvideo.com/jwplayer/jwplayer.html5.js",
   JWPLAYER_FLASH_URL = "http://www.longtailvideo.com/jwplayer/jwplayer.flash.swf",
+  EVENT_PREFIX = "popcorn_jwplayer_",
   apiCSS,
   apiReadyCallbacks = [],
+  canplayFired = false,
+  eventElement = document.createElement( "div" ),
   jwplayer = window.jwplayer,
-
   youtubeRegex = "",
   rtmpDirectRegex = "",
-
-  htmlMode,
 
   validMediaTypes = {
     // Video formats
@@ -104,13 +105,22 @@
       return;
     }
 
-    if ( !apiScriptElement ) {
+    if ( !apiScriptElement1 ) {
       // Insert the VideoJS script and wait for it to fire the callback
-      apiScriptElement = document.createElement( "script" );
-      apiScriptElement.async = true;
-      apiScriptElement.src = JWPLAYER_API_URL;
+      apiScriptElement1 = document.createElement( "script" );
+      apiScriptElement1.async = true;
+      apiScriptElement1.src = JWPLAYER_API_URL;
 
-      document.head.appendChild( apiScriptElement );
+      document.head.appendChild( apiScriptElement1 );
+    }
+
+    if ( !apiScriptElement2 ) {
+      // Insert the VideoJS script and wait for it to fire the callback
+      apiScriptElement2 = document.createElement( "script" );
+      apiScriptElement2.async = true;
+      apiScriptElement2.src = JWPLAYER_HTML5_URL;
+
+      document.head.appendChild( apiScriptElement2 );
     }
 
     if ( !apiReadyCallbacks.length ) {
@@ -119,32 +129,26 @@
     apiReadyCallbacks.push(fn);
   }
 
-  //function findExistingVideoJSPlayer( obj ) {
-    //var id, byName, player;
+  function findExistingPlayer( obj ) {
+    var item,
+        player,
+        i = 0;
 
-    //if ( !_V_ || !obj || !_V_.players ) {
-      //return false;
-    //}
+    if ( !window.jwplayer ) {
+      return;
+    }
 
-    //byName = typeof obj === 'string';
-    //id = byName ? obj : obj.id;
+    item = jwplayer( i );
+    while ( item.config ) {
+      if ( item === jwplayer( obj.container ) ) {
+        player = item;
+      }
+      i++;
+      item = jwplayer( i );
+    }
 
-    //player = _V_.players[ id ];
-    //if ( player && ( byName || obj === player ) ) {
-      //return player;
-    //}
-
-    //if ( typeof obj !== 'object' || typeof obj.techGet !== 'function' ) {
-      //return false;
-    //}
-
-    //for ( id in _V_.players ) {
-      //if ( _V_.players.hasOwnProperty( id ) && _V_.players[ id ] === obj ) {
-        //return _V_.players[ id ];
-      //}
-    //}
-    //return false;
-  //}
+    return player;
+  }
 
   function HTMLJWPlayerVideoElement( id ) {
 
@@ -180,7 +184,27 @@
       player,
       playerReadyCallbacks = [],
       stalledTimeout,
-      eventCallbacks = {};
+      eventCallbacks = {},
+      events = {
+        "canplay": undefined,
+        "canplaythrough": undefined,
+        "durationchange": undefined,
+        "ended": undefined,
+        "error": undefined,
+        "loadeddata": undefined,
+        "loadedmetadata": undefined,
+        "loadstart": undefined,
+        "pause": undefined,
+        "play": undefined,
+        "playing": undefined,
+        "progress": undefined,
+        "seeked": undefined,
+        "seeking": undefined,
+        "stalled": undefined,
+        "timeupdate": undefined,
+        "volumechange": undefined,
+        "waiting": undefined
+      };
 
     function playerReadyPromise( fn, unique ) {
       var i;
@@ -198,18 +222,19 @@
       playerReadyCallbacks.push( fn );
     }
 
+    // JWPlayer doesn't support removing event listeners so lets setup our own to make things function properly
     function registerEventListener( name, src, dest ) {
       var callback;
 
       //no duplicates, just in case
       callback = eventCallbacks[ name ];
       if ( callback ) {
-        player.removeEvent( name, callback );
+        return;
       }
 
       if ( typeof src === 'string' ) {
         callback = function() {
-          var val = player[ dest || src ];
+          var val = events[ dest || src ];
           if ( impl[ src ] !== val ) {
             impl[ src ] = val;
             self.dispatchEvent( name );
@@ -228,13 +253,71 @@
       }
 
       eventCallbacks[ name ] = callback;
-      player[ name ]( callback );
+      eventElement.addEventListener( EVENT_PREFIX + name, callback, false );
+    }
+
+    function setupJWPlayerEventCallbacks() {
+      var player = jwplayer( parent );
+
+      for ( var name in events ) {
+        events[ name ] = document.createEvent( "Event" );
+        events[ name ].initEvent( EVENT_PREFIX + name, true, true );
+      }
+
+      player.onBufferChange(function( e ) {
+        eventElement.dispatchEvent( events[ "progress" ] );
+      });
+
+      player.onPlay(function( e ) {
+        eventElement.dispatchEvent( events[ "play" ] );
+        eventElement.dispatchEvent( events[ "playing" ] );
+      });
+
+      player.onPause(function( e ) {
+        eventElement.dispatchEvent( events[ "pause" ] );
+      });
+
+      player.onIdle(function( e ) {
+        eventElement.dispatchEvent( events[ "stalled" ] );
+      });
+
+      player.onSeek(function( e ) {
+        eventElement.dispatchEvent( events[ "seeking" ] );
+        eventElement.dispatchEvent( events[ "seeked" ] );
+      });
+
+      player.onTime(function( e ) {
+        eventElement.dispatchEvent( events[ "timeupdate" ] );
+        if ( e.duration !== impl.duration ) {
+          eventElement.dispatchEvent( events[ "durationchange" ] );
+        }
+      });
+
+      player.onMute(function( e ) {
+        eventElement.dispatchEvent( events[ "volumechange" ] );
+      });
+
+      player.onVolume(function( e ) {
+        eventElement.dispatchEvent( events[ "volumechange" ] );
+      });
+
+      player.onError(function( e ) {
+        eventElement.dispatchEvent( events[ "error" ] );
+      });
+
+      player.onBufferFull(function( e ) {
+        eventElement.dispatchEvent( events[ "canplaythrough" ] );
+      });
+
+      player.onComplete(function( e ) {
+        eventElement.dispatchEvent( events[ "ended" ] );
+      });
     }
 
     function removeEventListeners() {
       Popcorn.forEach( eventCallbacks, function ( name, callback ) {
-        player.removeEvent( name, callback );
-      } );
+        eventElement.removeEventListener( EVENT_PREFIX + name, callback, false );
+      });
     }
 
     function setReadyState( state ) {
@@ -259,11 +342,14 @@
 
     function destroyPlayer() {
 
+      var player;
       clearTimeout( stalledTimeout );
 
       if( !( playerReady && player ) ) {
         return;
       }
+
+      player = jwplayer( parent );
 
       removeEventListeners();
 
@@ -271,7 +357,7 @@
         player.pause();
 
         try {
-          player.destroy();
+          player.remove();
         } catch (e) {}
 
         if ( elem && elem.parentNode === parent ) {
@@ -279,6 +365,7 @@
         }
       }
 
+      events = null;
       existingPlayer = null;
       player = null;
       parent = null;
@@ -286,8 +373,12 @@
       elem = null;
     }
 
-    function onDurationChange() {
-      impl.duration = player.duration();
+    function onDurationChange( e ) {
+      var player = jwplayer( parent );
+      if ( player.getDuration() === impl.duration ) {
+        return;
+      }
+      impl.duration = player.getDuration();
       if ( impl.readyState < self.HAVE_METADATA ) {
         setReadyState( self.HAVE_METADATA );
       } else {
@@ -328,12 +419,14 @@
     }
 
     function updateSize() {
+      var player = jwplayer( parent );
       player.width( impl.width );
       player.height( impl.height );
     }
 
     function changeSrc( aSrc ) {
 
+      var player;
       // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#media-element-load-algorithm
 
       destroyPlayer();
@@ -352,6 +445,7 @@
 
       if ( !impl.paused ) {
         if ( playerReady ) {
+          player = jwplayer( parent );
           player.pause();
         }
         impl.paused = false;
@@ -377,13 +471,18 @@
 
       // begin "resource fetch algorithm", set networkState to NETWORK_IDLE and fire "suspend" event
 
-      impl.src = aSrc;
+      if ( existingPlayer ) {
+        aSrc = impl.src = existingPlayer.config.file;
+      } else {
+        impl.src = aSrc;
+      }
 
       impl.networkState = self.NETWORK_LOADING;
       setReadyState( self.HAVE_NOTHING );
 
       apiReadyPromise(function() {
-        var sourceElem;
+        var sourceElem,
+            player = jwplayer( parent );
 
         if ( !impl.src ) {
           if ( player ) {
@@ -438,32 +537,63 @@
           player = jwplayer( parent );
         }
 
+        window.player = player;
         player.setup({
           "file": impl.src,
           "events": {
             "onReady": function( event ) {
               playerReady = true;
 
+              setupJWPlayerEventCallbacks();
+              player = jwplayer( parent );
               while ( playerReadyCallbacks.length ) {
                 ( playerReadyCallbacks.shift() )();
               }
             }
-          }
+          },
+          modes: [
+            {
+              "type": "html5"
+            },
+            {
+              "type": "flash",
+              "src": JWPLAYER_FLASH_URL
+            }
+          ]
         });
 
         playerReadyPromise( function () {
+          var player = jwplayer( parent );
           // set up event listeners
-          registerEventListener( "onError" );
+          registerEventListener( "error" );
 
           monitorStalled();
 
+          eventElement.addEventListener( EVENT_PREFIX + "play", function onPlay() {
+            if ( !impl.autoplay ) {
+              player.pause( true );
+            }
+            eventElement.removeEventListener( EVENT_PREFIX + "play", onPlay, false );
+          }, false);
+
+          player.play( true );
+          // Maps to HTML progress event
+          // The first time this fires, emit a `canplay` event as the user would technically be able to begin playback
           registerEventListener( "progress", function () {
-            if ( !impl.duration && player.duration() ) {
+            var player = jwplayer( parent );
+            if ( impl.duration <= 0 && player.getDuration() > 0 ) {
               onDurationChange();
             }
 
-            impl.progressAmount = player.buffered().end();
-            impl.progressAmount = Math.max( impl.progressAmount, player.currentTime() );
+            // This is the best we can do to notify a `canplay` event
+            if ( !canplayFired ) {
+              canplayFired = true;
+              setReadyState( self.HAVE_CURRENT_DATA );
+              setReadyState( self.HAVE_FUTURE_DATA );
+            }
+
+            impl.progressAmount = player.getBuffer();
+            impl.progressAmount = Math.max( impl.progressAmount, player.getPosition() );
 
             setReadyState( self.HAVE_CURRENT_DATA );
 
@@ -476,39 +606,33 @@
               impl.networkState = self.NETWORK_LOADING;
               monitorStalled();
             }
+
             return true;
-          } );
+          });
 
           registerEventListener( "stalled", onStalled );
 
-          registerEventListener( "onTime", "currentTime" );
-          registerEventListener( "onDuration", onDurationChange );
+          registerEventListener( "timeupdate", "currentTime" );
+          registerEventListener( "timeupdate", onDurationChange );
 
-          registerEventListener( "onVolume", function() {
-            var volume = player.volume(),
-              muted = player.muted();
+          registerEventListener( "volumechange", function() {
+            var player = jwplayer( parent ),
+                volume = player.getVolume() / 100,
+                muted = player.getMute();
 
+            muted = +muted;
             if ( impl.volume !== volume || impl.muted !== muted ) {
               impl.volume = volume;
               impl.muted = muted;
               return true;
             }
-          } );
-
-          registerEventListener( "canplay", function () {
-            if ( !impl.duration && player.duration() ) {
-              onDurationChange();
-            }
-
-            setReadyState( self.HAVE_CURRENT_DATA );
-            setReadyState( self.HAVE_FUTURE_DATA );
-          } );
+          });
 
           registerEventListener( "canplaythrough", function () {
             setReadyState( self.HAVE_ENOUGH_DATA );
-          } );
+          });
 
-          registerEventListener( "onPlay", function () {
+          registerEventListener( "play", function () {
             if ( impl.paused ) {
               impl.paused = false;
               if ( !impl.duration) {
@@ -522,17 +646,18 @@
           registerEventListener( "seeking" , function () {
             impl.seeking = true;
             return true;
-          } );
+          });
 
           registerEventListener( "seeked" , function () {
             if ( impl.seeking ) {
               impl.seeking = false;
               return true;
             }
-          } );
+          });
 
           registerEventListener( "playing", function () {
-            if ( !impl.duration && player.duration() ) {
+            var player = jwplayer( parent );
+            if ( !impl.duration && player.getDuration() ) {
               onDurationChange();
             }
 
@@ -540,6 +665,7 @@
               playingEventPending = true;
               return false;
             }
+
             setReadyState( self.HAVE_CURRENT_DATA );
             setReadyState( self.HAVE_FUTURE_DATA );
 
@@ -549,9 +675,9 @@
             }
 
             return true;
-          } );
+          });
 
-          registerEventListener( "onPause", function () {
+          registerEventListener( "pause", function () {
             if ( !impl.paused ) {
               //if ( impl.loop && player.currentTime >= impl.duration ) {
               //  return false;
@@ -570,7 +696,9 @@
     }
 
     function setVolume() {
-      player.volume( impl.muted > 0 ? 0 : impl.volume );
+      var player = jwplayer( parent );
+      player.setVolume( impl.muted > 0 ? 0 : impl.volume * 100 );
+      self.dispatchEvent( "volumechange" );
     }
 
     function getVolume() {
@@ -579,7 +707,8 @@
     }
 
     function setMuted() {
-      player.muted( impl.muted );
+      var player = jwplayer( parent );
+      player.setMute( impl.muted );
       setVolume();
     }
 
@@ -588,19 +717,25 @@
     }
 
     function setCurrentTime() {
-      player.currentTime( impl.currentTime );
+      // JWPlayer will automatically play the video after a seek so we need to store the value of
+      // `impl.paused` before we seek
+      var prevPauseState = impl.paused,
+          player = jwplayer( parent );
+      eventElement.addEventListener( EVENT_PREFIX + "seeked", function onSeeked() {
+        if ( prevPauseState ) {
+          player.pause( true );
+        }
+        eventElement.removeEventListener( EVENT_PREFIX + "seeked", onSeeked, false );
+      }, false);
+
+      player.seek( impl.currentTime );
     }
 
-    //existingPlayer = findExistingVideoJSPlayer( parent );
-    //if ( existingPlayer ) {
-      //elem = existingPlayer.el;
-      //parent = elem;
-      //changeSrc( existingPlayer );
-    //} else if ( parent && parent.nodeName === "VIDEO" ) {
-      //elem = parent;
-      //impl.src = elem.src;
-      //changeSrc( impl.src );
-    //}
+    existingPlayer = findExistingPlayer( parent );
+    if ( existingPlayer ) {
+      parent = existingPlayer.container;
+      changeSrc( existingPlayer );
+    }
 
     // Namespace all events we'll produce
     self._eventNamespace = Popcorn.guid( "HTMLJWPlayerVideoElement::" );
@@ -618,7 +753,8 @@
 
     self.play = function () {
       function play() {
-        player.play();
+        var player = jwplayer( parent );
+        player.play( true );
       }
 
       playerReadyPromise(play, true);
@@ -626,7 +762,8 @@
 
     self.pause = function () {
       function pause() {
-        player.pause();
+        var player = jwplayer( parent );
+        player.pause( true );
       }
 
       playerReadyPromise(pause, true);
@@ -698,17 +835,14 @@
 
       currentTime: {
         get: function() {
-          return player && player.currentTime() || 0;
+          var player = jwplayer( parent );
+          return player && player.getPosition() || 0;
         },
         set: function( aValue ) {
-          aValue = parseFloat( aValue );
-          /*
-          if( !impl.duration || aValue < 0 || impl.duration > 1 || isNaN( aValue ) ) {
-            throw "Invalid currentTime";
-          }
-          */
 
+          aValue = parseFloat( aValue );
           impl.currentTime = aValue;
+
           playerReadyPromise( setCurrentTime, true );
         }
       },
@@ -798,6 +932,10 @@
     var testVideo = document.createElement( "video" ),
         result;
 
+    if ( findExistingPlayer( source ) ) {
+      return "probably";
+    }
+
     // url can be array or obj, make lookup table
     if ( Array.isArray( source ) ) {
       for ( var i = 0, l = source.length; i < l && !result; i++ ) {
@@ -810,6 +948,10 @@
       result = testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
       return result;
     } else {
+      if ( typeof source !== "string" ) {
+        return EMPTY_STRING;
+      }
+
       var extensionIdx = source.lastIndexOf( "." ),
           extension = validMediaTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
 

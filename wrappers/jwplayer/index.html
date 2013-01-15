@@ -1,6 +1,8 @@
 <html>
   <head>
     <script src="../../popcorn.js"></script>
+    <script src="//www.longtailvideo.com/jwplayer/jwplayer.js"></script>
+    <script src="http://www.longtailvideo.com/jwplayer/jwplayer.html5.js"></script>
     <script src="../common/popcorn._MediaElementProto.js"></script>
     <script src="popcorn.HTMLJWPlayerVideoElement.js"></script>
     <script>
@@ -8,10 +10,17 @@
         var player,
             popcorn;
 
-        player = Popcorn.HTMLJWPlayerVideoElement( "video" );
-        player.src = "http://video-js.zencoder.com/oceans-clip.mp4";
-
-        window.popcorn = popcorn = Popcorn( player );
+        //player = Popcorn.HTMLJWPlayerVideoElement( "video" );
+        //player.src = "http://video-js.zencoder.com/oceans-clip.webm";
+        jwplayer( "video" ).setup({
+          "file": "http://video-js.zencoder.com/oceans-clip.webm",
+          "events": {
+            "onReady": function( event ) {
+              player = Popcorn.HTMLJWPlayerVideoElement( jwplayer( "video" ) );
+              window.popcorn = popcorn = Popcorn( player );
+            }
+          }
+        });
       }, false);
     </script>
   </head>
