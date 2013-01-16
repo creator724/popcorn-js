@@ -17,6 +17,7 @@
   jplayerScriptElement,
   apiReadyCallbacks = [],
   srcExtensions = "",
+  jQuery,
   jPlayer,
 
   validMediaTypes = {
@@ -88,9 +89,12 @@
 
   // Utility function to check if the neccessary APIs have been loaded
   function isJPlayerReady() {
-    if ( ( window.$ || window.jQuery ) && ( window.$.jPlayer || window.jQuery.jPlayer ) ) {
-      jPlayer = window.jQuery.jPlayer;
-      return true;
+    if ( jQuery || ( window.$ || window.jQuery ) ) {
+      jQuery = jQuery || window.$ || window.jQuery;
+      if ( jQuery.jPlayer ) {
+        jPlayer = jQuery.jPlayer;
+        return true;
+      }
     }
     return false;
   }
@@ -110,7 +114,7 @@
 
     // Utility function to inject the JPlayer script
     function injectJPlayerScript() {
-      if ( !window.$ || !window.jQuery ) {
+      if ( !jQuery ) {
         setTimeout( injectJPlayerScript, 10 );
         return;
       }
@@ -119,11 +123,11 @@
       jplayerScriptElement.src = JPLAYER_SCRIPT_URL;
 
       document.head.appendChild( jplayerScriptElement );
-      jPlayer = window.jQuery.jPlayer;
+      jPlayer = jQuery.jPlayer;
     }
 
     if ( isJPlayerReady() ) {
-      jPlayer = window.jQuery.jPlayer;
+      jPlayer = jQuery.jPlayer;
       fn();
       return;
     }
