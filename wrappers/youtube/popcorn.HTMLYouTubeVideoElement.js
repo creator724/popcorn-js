@@ -108,9 +108,6 @@
     }
   }
 
-  window.onYouTubeIframeAPIReady = function() {
-  };
-
   function HTMLYouTubeVideoElement( id ) {
 
     // YouTube iframe API requires postMessage
@@ -758,7 +755,7 @@
 
     self.play = function() {
       if( !playerReady ) {
-        addMetadataReadyCallback( function() { self.play(); } );
+        addPlayerReadyCallback( function() { self.play(); } );
         return;
       }
       player.playVideo();
@@ -766,7 +763,7 @@
 
     self.pause = function() {
       if( !playerReady ) {
-        addMetadataReadyCallback( function() { self.pause(); } );
+        addPlayerReadyCallback( function() { self.pause(); } );
         return;
       }
       player.pauseVideo();
