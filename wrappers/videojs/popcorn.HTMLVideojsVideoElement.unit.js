@@ -44,9 +44,8 @@ var players = {},
       _V_( elem ).ready(function() {
         video = testData.createMedia( this );
 
-        console.log( video );
         video._util.destroy();
-        equal( parent.children[ 0 ].children[ 0 ], elem, "Video element still exists after being destroyed" );
+        equal( elem.parentNode.parentNode, parent, "Video element still exists after being destroyed" );
         start();
       });
     });
