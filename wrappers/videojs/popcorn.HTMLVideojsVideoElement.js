@@ -679,6 +679,30 @@
         }
       },
 
+      videoHeight: {
+        get: function() {
+          if ( player ) {
+            if ( player.techName === "html5" && player.tech.el ) {
+              return player.tech.el.videoHeight;
+            }
+            return player.techGet && player.techGet( "videoHeight" ) || 0;
+          }
+          return 0;
+        }
+      },
+
+      videoWidth: {
+        get: function() {
+          if ( player ) {
+            if ( player.techName === "html5" && player.tech.el ) {
+              return player.tech.el.videoWidth;
+            }
+            return player.techGet && player.techGet( "videoWidth" ) || 0;
+          }
+          return 0;
+        }
+      },
+
       height: {
         get: function() {
           return elem && elem.height || impl.height;
