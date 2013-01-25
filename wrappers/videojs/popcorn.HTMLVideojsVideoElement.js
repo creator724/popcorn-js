@@ -171,6 +171,13 @@
       playerReadyCallbacks.push( fn );
     }
 
+    function dispatchEvent( event ) {
+      //fire all events asynch
+      setTimeout( function () {
+        self.dispatchEvent( event );
+      }, 0 );
+    }
+
     function registerEventListener( name, src, dest ) {
       var callback;
 
@@ -182,21 +189,26 @@
 
       if ( typeof src === 'string' ) {
         callback = function() {
-          var val = player[ dest || src ];
-          if ( impl[ src ] !== val ) {
-            impl[ src ] = val;
-            self.dispatchEvent( name );
+          var val;
+          if ( player ) {
+            val = player[ dest || src ];
+            if ( impl[ src ] !== val ) {
+              impl[ src ] = val;
+              dispatchEvent( name );
+            }
           }
         };
       } else if ( typeof src === 'function' ) {
         callback = function ( evt ) {
-          if ( src.apply( this, evt ) ) {
-            self.dispatchEvent( name );
+          if ( player && src.apply( this, evt ) ) {
+            dispatchEvent( name );
           }
         };
       } else {
         callback = function () {
-          self.dispatchEvent( name );
+          if ( player ) {
+            dispatchEvent( name );
+          }
         };
       }
 
@@ -226,7 +238,7 @@
       impl.readyState++;
       queue = readyStates[ impl.readyState ];
       for ( i = 0; i < queue.length; i++ ) {
-        self.dispatchEvent( queue[ i ] );
+        dispatchEvent( queue[ i ] );
       }
       setReadyState( maxReadyState );
     }
@@ -261,26 +273,32 @@
     }
 
     function onDurationChange() {
+      var duration = player.duration();
+
+      if ( !duration || duration === impl.duration ) {
+        return;
+      }
+
       impl.duration = player.duration();
       if ( impl.readyState < self.HAVE_METADATA ) {
         setReadyState( self.HAVE_METADATA );
       } else {
-        self.dispatchEvent( "durationchange" );
+        dispatchEvent( "durationchange" );
       }
 
       if ( playEventPending ) {
-        self.dispatchEvent( "play" );
+        dispatchEvent( "play" );
       }
 
       if ( playingEventPending ) {
         playingEventPending = false;
-        self.dispatchEvent( "playing" );
+        dispatchEvent( "playing" );
       }
 
       if ( playEventPending ) {
         playEventPending = false;
         if ( impl.paused ) {
-          self.dispatchEvent( "pause" );
+          dispatchEvent( "pause" );
         }
       }
     }
@@ -288,7 +306,7 @@
     function onStalled() {
       if ( !impl.duration || impl.progressAmount < impl.duration ) {
           impl.networkState = self.NETWORK_IDLE;
-          self.dispatchEvent( "stalled" );
+          dispatchEvent( "stalled" );
       } else {
         monitorStalled();
       }
@@ -323,9 +341,9 @@
 
       if ( impl.networkState !== self.NETWORK_EMPTY ) {
         if ( impl.networkState === self.NETWORK_LOADING || impl.networkState === self.NETWORK_IDLE ) {
-          self.dispatchEvent( "abort" );
+          dispatchEvent( "abort" );
         }
-        self.dispatchEvent( "emptied" );
+        dispatchEvent( "emptied" );
       }
 
       if ( !impl.paused ) {
@@ -341,7 +359,7 @@
 
       if ( impl.currentTime ) {
         impl.currentTime = 0;
-        self.dispatchEvent( "timeupdate" );
+        dispatchEvent( "timeupdate" );
       }
 
       impl.error = null;
@@ -382,7 +400,7 @@
             code: window.MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
           };
           impl.networkState = self.NETWORK_NO_SRC;
-          self.dispatchEvent( "error" );
+          dispatchEvent( "error" );
           return;
         }
 
@@ -525,7 +543,7 @@
 
             if ( impl.seeking ) {
               impl.seeking = false;
-              self.dispatchEvent( "seeked" );
+              dispatchEvent( "seeked" );
             }
 
             return true;
