@@ -225,7 +225,6 @@
     function setReadyState( state ) {
       var i, queue;
 
-      console.log( state, impl.readyState );
       if ( state <= impl.readyState ) {
         return;
       }
@@ -437,6 +436,7 @@
         if ( !player ) {
           player = _V_( elem );
         }
+
         player.ready(function() {
           playerReady = true;
 
@@ -587,17 +587,6 @@
 
     function setCurrentTime() {
       player.currentTime( impl.currentTime );
-    }
-
-    existingPlayer = findExistingVideoJSPlayer( parent );
-    if ( existingPlayer ) {
-      elem = existingPlayer.el;
-      parent = elem;
-      changeSrc( existingPlayer );
-    } else if ( parent && parent.nodeName === "VIDEO" ) {
-      elem = parent;
-      impl.src = elem.src;
-      changeSrc( impl.src );
     }
 
     // Namespace all events we'll produce
@@ -784,6 +773,29 @@
         }
       }
     } );
+
+    existingPlayer = findExistingVideoJSPlayer( parent );
+    if ( existingPlayer ) {
+      elem = existingPlayer.el;
+      parent = elem;
+      changeSrc( existingPlayer );
+    } else if ( parent && parent.nodeName === "VIDEO" ) {
+      elem = parent;
+      if ( elem.src ) {
+        impl.src = elem.src;
+      } else if ( elem.firstChild && elem.firstChild.nodeName === "SOURCE" ) {
+        impl.src = [];
+        Popcorn.forEach( elem.childNodes, function ( node ) {
+          if ( node.nodeName === "SOURCE" ) {
+            impl.src.push({
+              src: node.getAttribute('src'),
+              type: node.getAttribute('type')
+            });
+          }
+        } );
+      }
+      changeSrc( impl.src );
+    }
   }
 
   HTMLVideojsVideoElement.prototype = new Popcorn._MediaElementProto();
@@ -791,29 +803,43 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLVideojsVideoElement.prototype._canPlaySrc = function( source ) {
-    var testVideo = document.createElement( "video" ),
-        result;
+    var testVideo,
+        extensionIdx,
+        extension,
+        result,
+        i,
+        l;
+
     // url can be array or obj, make lookup table
     if ( Array.isArray( source ) ) {
-      for ( var i = 0, l = source.length; i < l && !result; i++ ) {
-        result = testVideo( source[ i ].type ) ? "probably" : EMPTY_STRING;
+      for ( i = 0, l = source.length; i < l; i++ ) {
+        result = HTMLVideojsVideoElement.prototype._canPlaySrc( source[ i ] );
         if ( result ) {
-          break;
+          return result;
         }
       }
       return result;
-    } else if ( typeof source === "object" ) {
-      result = testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
-      return result;
-    } else {
-      var extensionIdx = source.lastIndexOf( "." ),
-          extension = validVideoTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
+    }
+
+    if ( typeof source === "object" ) {
+      if ( source.type ) {
+        testVideo = document.createElement( "video" );
+        return testVideo.canPlayType( source.type ) ? "probably" : EMPTY_STRING;
+      } else {
+        source = source.url || "";
+      }
+    }
+
+    if ( typeof source === "string" ) {
+      extensionIdx = source.lastIndexOf( "." );
+      extension = validVideoTypes[ source.substr( extensionIdx + 1, source.length - extensionIdx ) ];
 
       if ( !extension ) {
         return EMPTY_STRING;
       }
-      result = testVideo.canPlayType( extension.type ) ? "probably" : EMPTY_STRING;
-      return result;
+
+      testVideo = document.createElement( "video" );
+      return testVideo.canPlayType( extension.type ) ? "probably" : EMPTY_STRING;
     }
   };
 
@@ -821,7 +847,7 @@
   HTMLVideojsVideoElement.prototype.canPlayType = function( type ) {
     var testVideo = document.createElement( "video" );
 
-    return type === "video/x-videojs" || video.canPlayType( type ) ? "probably" : EMPTY_STRING;
+    return type === "video/x-videojs" || testVideo.canPlayType( type ) ? "probably" : EMPTY_STRING;
   };
 
   Popcorn.HTMLVideojsVideoElement = function( id ) {
