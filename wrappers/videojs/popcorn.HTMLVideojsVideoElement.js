@@ -246,7 +246,7 @@
 
       clearTimeout( stalledTimeout );
 
-      if( !( playerReady && player ) ) {
+      if( !player ) {
         return;
       }
 
@@ -254,6 +254,11 @@
 
       if ( !existingPlayer ) {
         player.pause();
+
+        if ( player.techName === "html5" ) {
+          player.tech.el.src = "";
+          player.tech.el.load();
+        }
 
         try {
           player.destroy();
@@ -481,6 +486,7 @@
 
           registerEventListener( "timeupdate", "currentTime" );
           registerEventListener( "durationchange", onDurationChange );
+          registerEventListener( "loadedmetadata", onDurationChange );
 
           registerEventListener( "volumechange", function() {
             var volume = player.volume(),
