@@ -195,6 +195,109 @@ test( "Popcorn constructed TrackEvents", 2, function() {
   p.destroy();
 });
 
+asyncTest( "TrackEvent Invariant", 1, function() {
+  // Invariant Policy:
+  //
+  // 1. Popcorn invariantly exposes a TrackEvent where "track event data" is expected
+  // (eg. Popcorn had been allowed to freely jump between sometimes providing a TrackEvent
+  // and sometimes a plain object that is the result of extending a TrackEvent with
+  // options onto a new plain object).
+  //
+  // 2. A TrackEvent reference is invariantly always the same reference
+  // (vs. getting a new TrackEvent reference after modifying an existing TrackEvent)
+  //
+
+  var p = Popcorn( "#video" ),
+      references = [],
+      result;
+
+  Popcorn.plugin( "temp", {
+    _setup: function( track ) {
+      references.push({
+        source: "_setup",
+        track: track
+      });
+    },
+    start: function( event, track ) {
+      references.push({
+        source: "start",
+        track: track
+      });
+    },
+    end: function( event, track ) {
+      references.push({
+        source: "end",
+        track: track
+      });
+    },
+    _teardown: function( track ) {
+      references.push({
+        source: "_teardown",
+        track: track
+      });
+    },
+    _update: function( track ) {
+      references.push({
+        source: "_update",
+        track: track
+      });
+    }
+  });
+
+  [
+    "tracksetup", "trackstart", "trackend", "trackteardown",
+    "trackadded", "trackremoved",
+    "trackchange"
+  ].forEach(function( eventType ) {
+    p.on( eventType, function( event ) {
+      // We're only looking for events that were emitted for
+      // our test plugin.
+      if ( event.track.id === "asdf" ) {
+        references.push({
+          source: event.type,
+          track: event.track
+        });
+      }
+    });
+  });
+
+  p.temp({
+    id: "asdf",
+    start: 0,
+    end: 0
+  });
+
+  p.on( "canplayall", function() {
+    var track = this.getTrackEvent( "asdf" ),
+        sources = [];
+
+    // Modify the trackevent to initiate a trackchange event. This test
+    // revealed a bug that resulted in track modifications creating
+    // completely new track event instances, which is not _exactly_ what
+    // should happen. The same instance needs to persist for sake of reliable
+    // invariants. We can still safely recreate the behaviour of building
+    // an all new track event, but in reality we've reused the instance.
+    p.temp( "asdf", {
+      end: 1
+    });
+
+    this.cue( 3, function() {
+      result = references.every(function( ref, k ) {
+        sources.push( ref.source );
+        return ref.track === track;
+      });
+
+      ok( result, "All TrackEvents are true references, sources: " + sources.join(", ") );
+
+      Popcorn.removePlugin( "temp" );
+      p.pause( 0 );
+      p.destroy();
+      start();
+    });
+
+    this.play();
+  });
+});
 
 test( "Popcorn.removeTrackEvent", 5, function() {
 
@@ -938,8 +1041,11 @@ asyncTest( "roundTime", 1, function() {
 
   popped.on( "canplayall", function() {
     popped.off( "canplayall" );
-    popped.play().pause().currentTime( 0.98 );
+    popped.pause( 0.98 );
+  });
 
+  popped.on( "seeked", function() {
+    popped.off( "seeked" );
     equal( 1, popped.roundTime(), ".roundTime() returns 1 when currentTime is 0.98s" );
     popped.destroy();
     start();
@@ -1015,6 +1121,8 @@ asyncTest( "mute", function() {
 
   function plus(){
     if ( ++count == expects ) {
+      video.mute();
+      audio.mute();
       video.destroy();
       audio.destroy();
       start();
@@ -1023,6 +1131,7 @@ asyncTest( "mute", function() {
 
   video.on( "muted", function() {
 
+    this.off( "muted" );
     equal( this.media.muted, true, "Video `muted` attribute is true when muted" );
     plus();
 
@@ -1030,12 +1139,14 @@ asyncTest( "mute", function() {
 
   }).on( "unmuted", function() {
 
+    this.off( "unmuted" );
     equal( this.media.muted, false, "Video `muted` attribute is false when unmuted" );
     plus();
   });
 
   audio.on( "muted", function() {
 
+    this.off( "muted" );
     equal( this.media.muted, true, "Audio `muted` attribute is true when muted" );
     plus();
 
@@ -1043,6 +1154,7 @@ asyncTest( "mute", function() {
 
   }).on( "unmuted", function() {
 
+    this.off( "unmuted" );
     equal( this.media.muted, false, "Audio `muted` attribute is false when unmuted" );
     plus();
   });
@@ -1051,50 +1163,33 @@ asyncTest( "mute", function() {
   audio.mute();
 });
 
-asyncTest( "play(n)/pause(n) as shorthand to currentTime(n).play()/pause()", function() {
+asyncTest( "play(n) as shorthand to currentTime(n).play()", 1, function() {
+  var p = Popcorn( "#video" );
 
-  var $pop = Popcorn( "#video" ),
-      expects = 2,
-      count = 0,
-      fired = 0;
+  p.on( "seeked", function() {
+    equal( Math.round( p.currentTime() ), 5, "play(n) sets currentTime to 5" );
+    p.destroy();
+    start();
+  });
 
-  expect( expects );
+  p.on( "canplayall", function() {
+    p.play( 5 );
+  });
 
-  function plus() {
-    if ( ++count == expects ) {
-      $pop.destroy();
-      start();
-    }
-  }
+});
 
-  function poll() {
+asyncTest( "pause(n) as shorthand to currentTime(n).pause()", 1, function() {
+  var p = Popcorn( "#video" );
 
-    if ( $pop.media.readyState >= 2 ) {
-      // this should trigger immediately
-      var firstSeekedEvent = function() {
+  p.on( "seeked", function() {
+    equal( Math.round( p.currentTime() ), 5, "pause(n) sets currentTime to 5" );
+    p.destroy();
+    start();
+  });
 
-        $pop.off( "seeked", firstSeekedEvent );
-        equal( Math.round( $pop.currentTime() ), 10, "play(n) sets currentTime to 10" );
-        plus();
-
-        $pop.on( "seeked", secondSeekedEvent );
-        $pop.pause( 5 );
-      },
-      secondSeekedEvent = function() {
-
-        $pop.off( "seeked", secondSeekedEvent );
-        equal( Math.round( $pop.currentTime() ), 5, "pause(n) sets currentTime to 5" );
-        plus();
-      };
-
-      $pop.on( "seeked", firstSeekedEvent );
-      $pop.play( 10 ).pause();
-    } else {
-      setTimeout( poll, 10 );
-    }
-  }
-
-  poll();
+  p.on( "canplayall", function() {
+    p.pause( 5 );
+  });
 });
 
 // Originally written for #705 by chris de cairos
@@ -1271,25 +1366,31 @@ asyncTest( "Popcorn.events.hooks: canplayall", 1, function() {
 
 asyncTest( "Popcorn.events.hooks: canplayall fires immediately if ready", 1, function() {
 
-  //qunit-fixture
-  var $pop = Popcorn( "#video" ),
-      fired = 0;
+  var $pop = Popcorn( "#video" );
 
-  function poll() {
-    if ( $pop.media.readyState >= 2 ) {
-      // this should trigger immediately
-      $pop.on( "canplayall", function( event ) {
-        this.off( "canplayall" );
-        equal( ++fired, 1, "canplayall is fired immediately if readyState permits" );
-        $pop.destroy();
-        start();
-      });
-    } else {
-      setTimeout( poll, 10 );
-    }
-  }
+  $pop.on( "canplayall", function( event ) {
+    ok( true, "canplayall is fired immediately if readyState permits" );
+    $pop.destroy();
+    start();
+  });
 
-  poll();
+});
+
+asyncTest( "canplayall always fires asynchronously", 1, function() {
+
+  var p = Popcorn( "#video" ),
+      outsideFired = false;
+
+  // Bug 1391 - Wait for video to load some data so this can be tested properly
+  setTimeout(function() {
+    p.on( "canplayall", function() {
+      ok( outsideFired, "canplayall fired asynchronously" );
+      p.destroy();
+      start();
+    });
+
+    outsideFired = true;
+  }, 1000 );
 });
 
 asyncTest( "Popcorn.events.hooks: attrchange fires when attribute setter methods are called", 1, function() {
@@ -1441,7 +1542,7 @@ test( "Popcorn.dom.find() throws for invalid selectors in debug mode", function(
 
 
 module( "Popcorn Position" );
-test( "position", 25, function() {
+test( "position", 26, function() {
 
   var $absolute = $( ".absolute" ),
       $relative = $( ".relative" ),
@@ -1558,6 +1659,9 @@ test( "position", 25, function() {
   } catch( e ) {
     ok( false, e );
   }
+
+  var node = document.createElement( "video" );
+  equal( Popcorn.position( node ), null, "Nodes without a parent cannot have a position." );
 
   p.destroy();
   $( "#position-tests" ).hide();
@@ -2138,6 +2242,16 @@ asyncTest( "Configurable Defaults", function() {
     target: "custom",
     text: "hello!"
   }).currentTime( 2 ).play();
+});
+
+test( "Constructor options are copied to a new object. #1374", 1, function() {
+  var shared = {
+        a: 1
+      },
+      $a = Popcorn( "#video", shared ),
+      $b = Popcorn( "#video", shared );
+
+  notEqual( $a.options, $b.options, "Instance options are unique" );
 });
 
 test( "Plugin toString", 2, function() {
@@ -4360,7 +4474,7 @@ asyncTest( "end undefined or false should never be fired", 1, function() {
     end: function() {
       ok( false, "" );
       endFired = true;
-	}
+  }
   });
 
   Popcorn.plugin( "endingStory", {
@@ -4466,21 +4580,24 @@ asyncTest( "Cue API", 12, function() {
 
 
     // Modify an existing cue's function
-    p.cue( "c", function named() {});
+    function firstFn() {}
+    function secondFn() {}
 
-    equal( p.data.trackEvents.byStart.length, 7, "Modify an existing cue's function, p.cue( 'c', function() {} );" );
+    p.cue( "c", firstFn );
 
-    equal( p.getTrackEvent( "c" )._natives.start.name, "named", "Function modified, named" );
+    equal( p.data.trackEvents.byStart.length, 7, "Modify an existing cue's function, p.cue( 'c', firstFn );" );
+
+    equal( p.getTrackEvent( "c" )._natives.start, firstFn, "Function modified, is 'firstFn'" );
 
 
     // Modify an existing cue's time and function
-    p.cue( "c", 14, function renamed() {});
+    p.cue( "c", 14, secondFn );
 
-    equal( p.data.trackEvents.byStart.length, 7, "Modify an existing cue's time and function, p.cue( 'c', 14, function renamed() {});" );
+    equal( p.data.trackEvents.byStart.length, 7, "Modify an existing cue's time and function, p.cue( 'c', 14, secondFn );" );
 
     equal( p.getTrackEvent( "c" ).start, 14, "Time modified, 14" );
 
-    equal( p.getTrackEvent( "c" )._natives.start.name, "renamed", "Function modified, renamed" );
+    equal( p.getTrackEvent( "c" )._natives.start, secondFn, "Function modified, is 'secondFn'" );
 
 
     start();
@@ -4669,7 +4786,6 @@ test( "Modify cue or trackevent w/ update function provided", 3, function() {
     _update: function( trackEvent, newOptions ) {
       ok( true, "Successfully called track events update function" );
       deepEqual( newOptions.text, updateOptions.text, "Successfully received the new update options" );
-      equal( $pop.data.trackEvents.byStart.length, numTrackEvents, "Total number of track events didn't change" );
       trackEvent.text = newOptions.text;
     }
   });
@@ -4679,6 +4795,7 @@ test( "Modify cue or trackevent w/ update function provided", 3, function() {
   numTrackEvents = $pop.data.trackEvents.byStart.length;
 
   $pop.updateprovided( id, updateOptions );
+  equal( $pop.data.trackEvents.byStart.length, numTrackEvents, "Total number of track events didn't change" );
 
   Popcorn.removePlugin( "updateprovided" );
   $pop.destroy();
@@ -4716,11 +4833,556 @@ test( "Modify cue or trackevent w/o update function provided", 3, function() {
 
 });
 
+asyncTest( "trackstart w/ update into currentTime", 1, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id";
+
+  Popcorn.plugin( "updateprovided", {
+    _setup: function() {},
+    start: function() {},
+    end: function() {},
+    _teardown: function() {},
+    _update: function() {}
+  });
+
+  $pop.updateprovided( id, { start: 4, end: 5 } );
+
+  $pop.on( "canplayall", function canPlayAll() {
+    $pop.off( "canplayall", canPlayAll );
+
+    $pop.on( "seeked", function onSeeked() {
+      $pop.off( "seeked", onSeeked );
+
+      $pop.on( "trackstart", function onTrackStart() {
+        $pop.off( "trackstart", onTrackStart );
+        ok( true, "trackstart was fired when updating into currentTime" );
+        start();
+        Popcorn.removePlugin( "updateprovided" );
+        $pop.destroy();
+      });
+
+      // Ensures trackstart is fired when currentTime moves into plugins range.
+      $pop.updateprovided( id, { start: 2 } );
+
+    });
+
+    $pop.currentTime( 3 );
+  });
+
+});
+
+asyncTest( "trackstart w/ update while in currentTime", 1, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id",
+      startFired = false;
+
+  Popcorn.plugin( "updateprovided", {
+    _setup: function() {},
+    start: function() {},
+    end: function(){},
+    _teardown: function() {},
+    _update: function() {}
+  });
+
+  $pop.updateprovided( id, { start: 2, end: 5 } );
+
+  $pop.on( "canplayall", function canPlayAll() {
+    $pop.off( "canplayall", canPlayAll );
+
+    $pop.on( "seeked", function onSeeked() {
+      $pop.off( "seeked", onSeeked );
+
+      $pop.on( "trackstart", function onTrackStart() {
+        $pop.off( "trackstart", onTrackStart );
+        startFired = true;
+      });
+
+      $pop.on( "trackchange", function onTrackChange() {
+        $pop.off( "trackchange", onTrackChange );
+        ok( !startFired, "start wasn't fired when currentTime is already in plugins range" );
+        start();
+        Popcorn.removePlugin( "updateprovided" );
+        $pop.destroy();
+      });
+
+      // Ensures trackstart isn't fired when currentTime is already in plugins range.
+      $pop.updateprovided( id, { start: 3 } );
+
+    });
+
+    $pop.currentTime( 3 );
+  });
+
+});
+
+asyncTest( "trackend w/ update out of currentTime", 1, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id",
+      startFired = false;
+
+  Popcorn.plugin( "updateprovided", {
+    _setup: function() {},
+    start: function() {},
+    end: function() {},
+    _teardown: function() {},
+    _update: function() {}
+  });
+
+  $pop.updateprovided( id, { start: 2, end: 5 } );
+
+  $pop.on( "canplayall", function canPlayAll() {
+    $pop.off( "canplayall", canPlayAll );
+
+    $pop.on( "seeked", function onSeeked() {
+      $pop.off( "seeked", onSeeked );
+
+      $pop.on( "trackend", function onTrackEnd() {
+        $pop.off( "trackend", onTrackEnd );
+        ok( true, "trackend fired when currentTime not in plugin range after update" );
+        start();
+        Popcorn.removePlugin( "updateprovided" );
+        $pop.destroy();
+      });
+
+      // Ensures trackend is fired when currentTime is outside plugins range.
+      $pop.updateprovided( id, { end: 3 } );
+
+    });
+
+    $pop.currentTime( 4 );
+  });
+
+});
+
+asyncTest( "trackend w/ update while in currentTime", 1, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id",
+      endFired = false;
+
+  Popcorn.plugin( "updateprovided", {
+    _setup: function() {},
+    start: function() {},
+    end: function() {},
+    _teardown: function() {},
+    _update: function() {}
+  });
+
+  $pop.updateprovided( id, { start: 2, end: 5 } );
+
+  $pop.on( "canplayall", function canPlayAll() {
+    $pop.off( "canplayall", canPlayAll );
+
+    $pop.on( "seeked", function onSeeked() {
+      $pop.off( "seeked", onSeeked );
+
+      $pop.on( "trackend", function onTrackEnd() {
+        $pop.off( "trackend", onTrackEnd );
+        endFired = true;
+      });
+
+      $pop.on( "trackchange", function onTrackChange() {
+        $pop.off( "trackchange", onTrackChange );
+        ok( !endFired, "end wasn't fired when currentTime is already in plugins range" );
+        start();
+        Popcorn.removePlugin( "updateprovided" );
+        $pop.destroy();
+      });
+
+      // Ensures trackstart isn't fired when currentTime is already in plugins range.
+      $pop.updateprovided( id, { end: 4 } );
+
+    });
+
+    $pop.currentTime( 3 );
+  });
+
+});
+
+asyncTest( "trackstart/trackend fired appropriately w/o update function", 3, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id",
+      endCalledFirst = false,
+      updateOptions = {
+        start: 3,
+        end: 5
+      };
+
+  Popcorn.plugin( "noupdateprovided", {
+    _setup: function() {},
+    start: function() {},
+    end: function() {},
+    _teardown: function() {}
+  });
+
+  $pop.noupdateprovided( id, {
+    start: 0,
+    end: 3
+  });
+
+  $pop.on( "canplayall", function canPlayAll() {
+    $pop.off( "canplayall", canPlayAll );
+
+    $pop.on( "seeked", function onSeeked() {
+      $pop.off( "seeked", onSeeked );
+
+      $pop.on( "trackstart", function onTrackStart() {
+        $pop.off( "trackstart", onTrackStart );
+        ok( true, "trackstart was successfully fired when updating a plugin" );
+        ok( endCalledFirst, "End was called first before start when updating a plugin with default update." );
+        start();
+        Popcorn.removePlugin( "noupdateprovided" );
+        $pop.destroy();
+      });
+
+      $pop.on( "trackend", function onTrackEnd() {
+        $pop.off( "trackend", onTrackEnd );
+        endCalledFirst = true;
+        ok( true, "trackend was successfully fired when updating a plugin with default update." );
+        $pop.currentTime( 4 );
+      });
+
+      $pop.noupdateprovided( id, updateOptions );
+    });
+
+    $pop.currentTime( 2 );
+  });
+
+});
+
+test( "trackchange w/ update function provided", 3, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id",
+      updateOptions = {
+        text: "New Text"
+      };
+
+  Popcorn.plugin( "updateprovided", {
+    _setup: function() {},
+    start: function() {},
+    end: function(){},
+    _teardown: function( trackEvent ) {},
+    _update: function( trackEvent, newOptions ) {}
+  });
+
+  $pop.updateprovided( id, {
+    start: 2,
+    end: 5,
+    text: "Old Text"
+  });
+
+  $pop.on( "trackchange", function( e ) {
+    ok( true, "trackchange fired with an update function provided" );
+    equal( e.previousValue.text, "Old Text", "Previous options passed expected value" );
+    deepEqual( e.currentValue.text, updateOptions.text, "Previous options passed expected value" );
+  });
+
+  $pop.updateprovided( id, updateOptions );
+
+  Popcorn.removePlugin( "updateprovided" );
+  $pop.destroy();
+
+});
+
+test( "trackchange w/o update function provided", 3, function() {
+  var $pop = Popcorn( "#video" ),
+      id = "test-id",
+      updateOptions = {
+        text: "New Text"
+      };
+
+  Popcorn.plugin( "noupdateprovided", {
+    _setup: function( options ) {},
+    start: function() {},
+    end: function(){},
+    _teardown: function() {}
+  });
+
+  $pop.noupdateprovided( id, {
+    text: "Old Text"
+  });
+
+  $pop.on( "trackchange", function( e ) {
+    ok( true, "trackchange fired without an update function provided" );
+    equal( e.previousValue.text, "Old Text", "Previous options passed expected value" );
+    deepEqual( e.currentValue.text, updateOptions.text, "Previous options passed expected value" );
+  });
+
+  $pop.noupdateprovided( id, updateOptions );
+
+  Popcorn.removePlugin( "noupdateprovided" );
+  $pop.destroy();
+
+});
+
+test( "Modify plugin w/o provided update without setup for plugins that use function that returns object", 6, function() {
+  var $pop = Popcorn( "#video" ),
+      count = 0,
+      id,
+      updateOptions = {
+        text: "New Text"
+      };
+
+  Popcorn.plugin( "weirdstyle", function( options ) {
+    var text = options.text;
+
+    if ( ++count === 2 ) {
+      ok( true, "Function acting as setup was called again after update" );
+      deepEqual( options.text, updateOptions.text, "Update options were merged correctly" );
+    }
+
+    return {
+      start: function( event, options ) {
+        equal( options.text, text, "Function scope variable matches" );
+      },
+      end: function( event, options ) {
+        ok( true, "end called on update" );
+      },
+      _teardown: function( options ) {
+        ok( true, "_teardown called on update" );
+      }
+    };
+  });
+
+  $pop.weirdstyle({
+    start: $pop.currentTime(),
+    end: $pop.currentTime() + 1,
+    text: "Old Text"
+  });
+
+  id = $pop.getLastTrackEventId();
+
+  $pop.weirdstyle( id, updateOptions );
+
+  Popcorn.removePlugin( "weirdstyle" );
+  $pop.destroy();
+});
+
+test( "Modify plugin w/o provided update with setup for plugins that use function that returns object", 6, function() {
+  var $pop = Popcorn( "#video" ),
+      count = 0,
+      id,
+      updateOptions = {
+        text: "New Text"
+      };
+
+  Popcorn.plugin( "weirdstyle", function( options ) {
+    var text;
+
+    return {
+      _setup: function( options ) {
+        text = options.text;
+
+        if ( ++count === 2 ) {
+          ok( true, "Function acting as setup was called again after update" );
+          deepEqual( text, updateOptions.text, "Update options were merged correctly" );
+        }
+      },
+      start: function( event, options ) {
+        equal( options.text, text, "Function scope variable matches" );
+      },
+      end: function() {
+        ok( true, "end called on update" );
+      },
+      _teardown: function() {
+        ok( true, "_teardown called on update" );
+      }
+    };
+  });
+
+  $pop.weirdstyle({
+    start: $pop.currentTime(),
+    end: $pop.currentTime() + 1,
+    text: "Old Text"
+  });
+
+  id = $pop.getLastTrackEventId();
+
+  $pop.weirdstyle( id, updateOptions );
+  Popcorn.removePlugin( "weirdstyle" );
+  $pop.destroy();
+});
+
+test( "Updates apply to options object if plugin is defined as an Object (#1384)", 2 , function() {
+  var $pop = Popcorn( "#video" ),
+      trackEvent;
+
+  Popcorn.plugin( "definedByObject", {
+      start: Popcorn.nop,
+      end: Popcorn.nop,
+      _update: function( trackEvent, options ) {
+        trackEvent.text = options.text;
+      },
+      _setup: function( options ) {
+        options.toString = function() {
+          return options.text;
+        };
+      }
+    }
+  );
+
+  $pop.definedByObject( "fooTest", {
+    text: "foo"
+  });
+
+  trackEvent = $pop.getTrackEvent( "fooTest" );
+
+  equal( trackEvent.toString(), "foo", "Calling toString on the track event returns initialized value" );
+
+  $pop.definedByObject( "fooTest", {
+    text: "newFoo"
+  });
+
+  equal( trackEvent.toString(), "newFoo", "After an update, calling toString on the track event returns updated value" );
+
+  $pop.removePlugin( "definedByObject" );
+  $pop.destroy();
+
+});
+
+test( "Call definition function if plugin is defined by a function (#1384)", 2 , function() {
+  var $pop = Popcorn( "#video" ),
+      trackEvent;
+
+  Popcorn.plugin( "definedByFunction", function( options ) {
+    options.toString = function() {
+      return options.text;
+    };
+    return {
+      start: Popcorn.nop,
+      end: Popcorn.nop,
+      _update: function( trackEvent, options ) {
+        trackEvent.text = options.text;
+      }
+    };
+  });
+
+  $pop.definedByFunction( "fooTest", {
+    text: "foo"
+  });
+
+  trackEvent = $pop.getTrackEvent( "fooTest" );
+
+  equal( trackEvent.toString(), "foo", "Calling toString on the track event returns initialized value" );
+
+  $pop.definedByFunction( "fooTest", {
+    text: "newFoo"
+  });
+
+  equal( trackEvent.toString(), "newFoo", "After an update, calling toString on the track event returns updated value" );
+
+  $pop.removePlugin( "definedByFunction" );
+  $pop.destroy();
+
+});
+
+test( "Filter TrackEvents by parameters", 4, function() {
+  var $pop = Popcorn( "#video" ),
+      tracks = 6,
+      result = false,
+      filtereds;
+
+  Popcorn.plugin( "filterme" , function() {
+    return {
+      start: function( event, options ) {},
+      end: function( event, options ) {}
+    };
+  });
+
+  while ( tracks-- ) {
+    $pop.filterme({
+      start: 0,
+      end: 10
+    });
+  }
+
+  equal( $pop.data.trackEvents.count, 8, "There are 8 trackevents: 2 padding, 6 user" );
+
+  filtereds = $pop.data.trackEvents.where({ plugin: "filterme" });
+
+  result = filtereds.every(function( event ) {
+    return event._natives.plugin === "filterme";
+  });
+
+  equal( filtereds.length, 6, "Correct number of plugins matching the name 'filterme' " );
+  ok( result, "Plugins matching the name 'filterme'" );
+
+  filtereds = $pop.data.trackEvents.where({ _running: true });
+
+  result = filtereds.every(function( event ) {
+    return event._running === true;
+  });
+
+  ok( result, "Filter TrackEvents for plugins currently running" );
+
+  Popcorn.removePlugin( "filterme" );
+  $pop.destroy();
+});
+
+test( "Remove TrackEvents by parameters", 2, function() {
+  var $pop = Popcorn( "#video" ),
+      tracks = 6,
+      result = false,
+      remaining;
+
+  Popcorn.plugin( "removeme" , function() {
+    return {
+      start: function( event, options ) {},
+      end: function( event, options ) {}
+    };
+  });
+
+  // Add 6 of the TrackEvents for the "removeme" plugin
+  // Doing so and testing against an object with many of the
+  // same trackevents will ensure that the implementation correctly
+  // removes _all_ trackevents of a given type.
+  while ( tracks-- ) {
+    $pop.removeme({
+      start: 0,
+      end: 10
+    });
+  }
+
+  equal( $pop.data.trackEvents.count, 8, "8 trackevents: 2 padding, 6 user" );
+
+  $pop.data.trackEvents.remove({ plugin: "removeme" });
+
+  equal( $pop.data.trackEvents.count, 2, "2 trackevents: 2 padding, 0 user" );
+
+  Popcorn.removePlugin( "removeme" );
+  $pop.destroy();
+
+});
+
 module( "Popcorn XHR" );
 test( "Basic", 2, function() {
 
   equal( typeof Popcorn.xhr, "function" , "Popcorn.xhr is a provided static function" );
   equal( typeof Popcorn.xhr.httpData, "function" , "Popcorn.xhr.httpData is a provided static function" );
+});
+
+asyncTest( "Request Type: GET", 1, function() {
+  Popcorn.xhr({
+    url: "data/method.php?a=1",
+    type: "GET",
+    dataType: "json",
+    success: function( data ) {
+      equal( data.method, "get", "Successful request type: GET" );
+      start();
+    }
+  });
+});
+
+asyncTest( "Request Type: POST", 1, function() {
+  Popcorn.xhr({
+    url: "data/method.php",
+    type: "POST",
+    data: "a=1",
+    dataType: "json",
+    success: function( data ) {
+      equal( data.method, "post", "Successful request type: POST" );
+      start();
+    }
+  });
 });
 
 asyncTest( "Text Response", 2, function() {

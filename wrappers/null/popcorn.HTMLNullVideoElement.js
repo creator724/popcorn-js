@@ -23,19 +23,21 @@
   temporalRegex = /#t=(\d+)?,?(\d+)?/;
 
   function NullPlayer( options ) {
+    this.startTime = 0;
     this.currentTime = options.currentTime || 0;
     this.duration = options.duration || NaN;
     this.playInterval = null;
+    this.paused = true;
     this.ended = options.endedCallback || Popcorn.nop;
   }
 
   function nullPlay( video ) {
-    if( video.currentTime + DEFAULT_UPDATE_RESOLUTION_S >= video.duration ) {
+    video.currentTime += ( Date.now() - video.startTime ) / 1000;
+    video.startTime = Date.now();
+    if( video.currentTime >= video.duration ) {
       video.currentTime = video.duration;
       video.pause();
       video.ended();
-    } else {
-      video.currentTime += DEFAULT_UPDATE_RESOLUTION_S;
     }
   }
 
@@ -43,12 +45,19 @@
 
     play: function() {
       var video = this;
-      this.playInterval = setInterval( function() { nullPlay( video ); },
-                                       DEFAULT_UPDATE_RESOLUTION_MS );
+      if ( this.paused ) {
+        this.paused = false;
+        this.startTime = Date.now();
+        this.playInterval = setInterval( function() { nullPlay( video ); },
+                                         DEFAULT_UPDATE_RESOLUTION_MS );
+      }
     },
 
     pause: function() {
-      clearInterval( this.playInterval );
+      if ( !this.paused ) {
+        this.paused = true;
+        clearInterval( this.playInterval );
+      }
     },
 
     seekTo: function( aTime ) {
@@ -63,7 +72,7 @@
 
     var self = this,
       parent = typeof id === "string" ? document.querySelector( id ) : id,
-      elem,
+      elem = document.createElement( "div" ),
       playerReady = false,
       player,
       impl = {
@@ -138,7 +147,7 @@
       player.pause();
       player = null;
       parent.removeChild( elem );
-      elem = null;
+      elem = document.createElement( "div" );
     }
 
     function changeSrc( aSrc ) {
@@ -158,15 +167,14 @@
         destroyPlayer();
       }
 
-      elem = document.createElement( "div" );
       elem.width = impl.width;
       elem.height = impl.height;
       parent.appendChild( elem );
 
       // Parse out the start and duration, if specified
       var fragments = temporalRegex.exec( aSrc ),
-          start = fragments[ 1 ],
-          duration = fragments [ 2 ];
+          start = +fragments[ 1 ],
+          duration = +fragments[ 2 ];
 
       player = new NullPlayer({
         currentTime: start,
@@ -209,6 +217,7 @@
     }
 
     function onSeeked() {
+      impl.ended = false;
       impl.seeking = false;
       self.dispatchEvent( "timeupdate" );
       self.dispatchEvent( "seeked" );
@@ -225,6 +234,7 @@
       } else {
         if( impl.ended ) {
           changeCurrentTime( 0 );
+          impl.ended = false;
         }
 
         if ( impl.paused ) {
@@ -246,7 +256,9 @@
         return;
       }
       player.play();
-      onPlay();
+      if ( impl.paused ) {
+        onPlay();
+      }
     };
 
     function onPause() {
@@ -261,7 +273,9 @@
         return;
       }
       player.pause();
-      onPause();
+      if ( !impl.paused ) {
+        onPause();
+      }
     };
 
     function onEnded() {
@@ -270,7 +284,7 @@
         self.play();
       } else {
         impl.ended = true;
-        clearInterval( timeUpdateInterval );
+        onPause();
         self.dispatchEvent( "timeupdate" );
         self.dispatchEvent( "ended" );
       }
@@ -330,7 +344,8 @@
           return elem.width;
         },
         set: function( aValue ) {
-          impl.width = aValue;
+          elem.width = aValue;
+          impl.width = elem.width;
         }
       },
 
@@ -339,7 +354,8 @@
           return elem.height;
         },
         set: function( aValue ) {
-          impl.height = aValue;
+          elem.height = aValue;
+          impl.height = elem.height;
         }
       },
 

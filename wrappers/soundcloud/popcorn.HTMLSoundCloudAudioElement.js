@@ -49,7 +49,7 @@
 
     var self = this,
       parent = typeof id === "string" ? Popcorn.dom.find( id ) : id,
-      elem,
+      elem = document.createElement( "iframe" ),
       impl = {
         src: EMPTY_STRING,
         networkState: self.NETWORK_EMPTY,
@@ -140,11 +140,6 @@
 
       playerReady = true;
       player.getDuration( updateDuration );
-
-      // Apply the current controls state again, since we have
-      // to do one thing for controls=false and loading, and another
-      // for controls=false and loaded.
-      setControls( impl.controls );
     }
 
     // When the player widget is ready, kick-off a play/pause
@@ -244,7 +239,7 @@
       player.unbind( SC.Widget.Events.FINISH );
 
       parent.removeChild( elem );
-      elem = null;
+      elem = document.createElement( "iframe" );
     }
 
     self.play = function() {
@@ -259,16 +254,23 @@
     };
 
     function changeCurrentTime( aTime ) {
-      if( !playerReady ) {
-        addPlayerReadyCallback( function() { changeCurrentTime( aTime ); } );
-        return;
-      }
+      impl.currentTime = aTime;
 
       // Convert to ms
       aTime = aTime * 1000;
 
-      onSeeking();
-      player.seekTo( aTime );
+      function seek() {
+        onSeeking();
+        player.seekTo( aTime );
+        onSeeked();
+      }
+
+      if( !playerReady ) {
+        addMediaReadyCallback( seek );
+        return;
+      }
+
+      seek();
     }
 
     function onSeeking() {
@@ -340,10 +342,10 @@
         // restart playing after ended.  Also, the onPause callback won't get
         // called when we do self.pause() here, so we manually set impl.paused
         // to get the state right.
+        impl.ended = true;
         self.pause();
         onPause();
-
-        impl.ended = true;
+        self.dispatchEvent( "timeupdate" );
         self.dispatchEvent( "ended" );
       }
     }
@@ -377,7 +379,6 @@
           break;
         case "seek":
           onCurrentTime( event.data );
-          onSeeked();
           break;
       }
     }
@@ -418,7 +419,6 @@
       playerReady = false;
 
       SC.get( "/resolve", { url: aSrc }, function( data ) {
-        elem = document.createElement( "iframe" );
         elem.id = Popcorn.guid( "soundcloud-" );
         elem.width = impl.width;
         elem.height = impl.height;
@@ -442,7 +442,7 @@
           self.dispatchEvent( "loadstart" );
           self.dispatchEvent( "progress" );
         };
-        elem.src = "http://w.soundcloud.com/player/?url=" + data.uri +
+        elem.src = "https://w.soundcloud.com/player/?url=" + data.uri +
           "&show_artwork=false" +
           "&buying=false" +
           "&liking=false" +
@@ -496,21 +496,18 @@
     }
 
     function setControls( controls ) {
-      // If the iframe elem isn't ready yet, bail.  We'll call again when it is.
-      if ( elem ) {
-        // Due to loading issues with hidden content, we have to be careful
-        // about how we hide the player when controls=false.  Using opacity:0
-        // will let the content load, but allow mouse events.  When it's totally
-        // loaded we can visibility:hidden + position:absolute it.
-        if ( playerReady ) {
-          elem.style.position = "absolute";
-          elem.style.visibility = controls ? "visible" : "hidden";
-        } else {
-          elem.style.opacity = controls ? "1" : "0";
-          // Try to stop mouse events over the iframe while loading. This won't
-          // work in current Opera or IE, but there's not much I can do
-          elem.style.pointerEvents = controls ? "auto" : "none";
-        }
+      // Due to loading issues with hidden content, we have to be careful
+      // about how we hide the player when controls=false.  Using opacity:0
+      // will let the content load, but allow mouse events.  When it's totally
+      // loaded we can visibility:hidden + position:absolute it.
+      if ( playerReady ) {
+        elem.style.position = "absolute";
+        elem.style.visibility = controls ? "visible" : "hidden";
+      } else {
+        elem.style.opacity = controls ? "1" : "0";
+        // Try to stop mouse events over the iframe while loading. This won't
+        // work in current Opera or IE, but there's not much I can do
+        elem.style.pointerEvents = controls ? "auto" : "none";
       }
       impl.controls = controls;
     }
@@ -551,7 +548,8 @@
           return elem.width;
         },
         set: function( aValue ) {
-          impl.width = aValue;
+          elem.width = aValue;
+          impl.width = elem.width;
         }
       },
 
@@ -560,7 +558,8 @@
           return elem.height;
         },
         set: function( aValue ) {
-          impl.height = aValue;
+          elem.height = aValue;
+          impl.height = elem.height;
         }
       },
 
@@ -658,7 +657,7 @@
 
   // Helper for identifying URLs we know how to play.
   HTMLSoundCloudAudioElement.prototype._canPlaySrc = function( url ) {
-    return (/(?:http:\/\/www\.|http:\/\/|www\.|\.|^)(soundcloud)/).test( url ) ?
+    return (/(?:https?:\/\/www\.|https?:\/\/|www\.|\.|^)(soundcloud)/).test( url ) ?
       "probably" : EMPTY_STRING;
   };
 

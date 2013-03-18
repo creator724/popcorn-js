@@ -511,7 +511,7 @@ asyncTest( "T24 - currentTime, seeking, seeked [Known to fail with Vimeo+Firefox
 });
 
 
-asyncTest( "T25 - ended [Known to fail with Vimeo+Chrome, Vimeo+Firefox (ticket #1266)]", 1, function() {
+asyncTest( "T25 - ended [Known to fail with Vimeo+Chrome, Vimeo+Firefox (ticket #1266)]", 4, function() {
 
   var video = testData.createMedia( "#video" );
   var duration = testData.shortVideoSrc ? testData.shortExpectedDuration : testData.expectedDuration;
@@ -522,11 +522,22 @@ asyncTest( "T25 - ended [Known to fail with Vimeo+Chrome, Vimeo+Firefox (ticket 
     video.currentTime = duration - 1;
   }, false);
 
-  video.addEventListener( "ended", function onEnded() {
-    video.removeEventListener( "ended", onEnded, false );
-    ok( true, "ended fired at end" );
-    start();
-  }, false);
+  video.addEventListener( "pause", function onPause() {
+    video.removeEventListener( "pause", onPause, false );
+    ok( true, "pause fired at end" );
+    ok( video.ended, "pause fired at end [Known to fail in youtube due to pause events being fired at some unspecified time after a seekTo call.]" );
+
+    video.addEventListener( "timeupdate", function onTimeUpdate() {
+      video.removeEventListener( "timeupdate", onTimeUpdate, false );
+      ok( true, "timeupdate fired at end" );
+
+      video.addEventListener( "ended", function onEnded() {
+        video.removeEventListener( "ended", onEnded, false );
+        ok( true, "ended fired at end" );
+        start();
+      }, false );
+    }, false );
+  }, false );
 
   video.autoplay = true;
   video.muted = true;
@@ -644,7 +655,6 @@ test( "T30 - error when video parameter is bad", function() {
     video.removeEventListener( "error", onError, false );
     equal( video.error.code, MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED,
            "MEDIA_ERR_SRC_NOT_SUPPORTED when param is invalid." );
-    start();
   }, false);
 
   video.src = "data:video/x-fake;base64,0";
@@ -690,6 +700,67 @@ test( "T33 - networkState", function() {
 
 });
 
+asyncTest( "T34 - paused state during autoplay", 10, function() {
+
+  var video = testData.createMedia( "#video" ),
+      loadedMetaDataFired = false,
+      canplayFired = false,
+      playFired = false,
+      playingFired = false,
+      canPlayThrough = false;
+
+  video.addEventListener( "loadedmetadata", function onLoadedMetaData() {
+    video.removeEventListener( "loadedmetadata", onLoadedMetaData, false );
+    loadedMetaDataFired = true;
+    ok( !video.paused, "video is playing during loadedmetadata" );
+  }, false);
+
+  video.addEventListener( "canplay", function onCanPlay() {
+    video.removeEventListener( "canplay", onCanPlay, false );
+    canPlayFired = true;
+    ok( !playFired, "play has not yet been fired on canplay from an autoplay" );
+    ok( loadedMetaDataFired, "loadedMetaDataFired has been fired on canplay from an autoplay" );
+  }, false);
+
+  video.addEventListener( "play", function onPlay() {
+    video.removeEventListener( "play", onPlay, false );
+    playFired = true;
+    ok( !playingFired, "playing has not yet been fired on play from an autoplay" );
+    ok( canPlayFired, "canplay has been fired on play from an autoplay" );
+  }, false);
+
+  video.addEventListener( "playing", function onPlaying() {
+    video.removeEventListener( "playing", onPlaying, false );
+    playingFired = true;
+    ok( !canPlayThrough, "canplaythrough has not yet been fired on playing from an autoplay" );
+    ok( playFired, "play has been fired on playing from an autoplay" );
+  }, false);
+
+  video.addEventListener( "canplaythrough", function onCanPlayThrough() {
+    video.removeEventListener( "canplaythrough", onCanPlayThrough, false );
+    canPlayThrough = true;
+    ok( playingFired, "playing has been fired on canplaythrough from an autoplay" );
+    start();
+  }, false);
+
+  video.autoplay = true;
+  ok( video.paused, "video does not autoplay before source" );
+  video.src = testData.videoSrc;
+  ok( video.paused, "video does not autoplay before ready events" );
+
+});
+
+asyncTest( "T35 - duration ready in loadedmetadata", 1, function() {
+
+  var video = testData.createMedia( "#video" );
+
+  video.addEventListener( "loadedmetadata", function onLoadedMetaData() {
+    video.removeEventListener( "loadedmetadata", onLoadedMetaData, false );
+    ok( video.duration, "video is playing during loadedmetadata" );
+    start();
+  }, false);
+  video.src = testData.videoSrc;
+});
 
 // Add any player-specific sync tests now
 if( testData.playerSpecificSyncTests ) {

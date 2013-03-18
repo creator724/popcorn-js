@@ -4,12 +4,7 @@
 
   CURRENT_TIME_MONITOR_MS = 16,
   EMPTY_STRING = "",
-  VIMEO_PLAYER_URL = "http://player.vimeo.com/video/",
-
-  // Vimeo doesn't give a suggested min size, YouTube suggests 200x200
-  // as minimum, video spec says 300x150.
-  MIN_WIDTH = 300,
-  MIN_HEIGHT = 200;
+  VIMEO_HOST = window.location.protocol + "//player.vimeo.com";
 
   // Utility wrapper around postMessage interface
   function VimeoPlayer( vimeoIFrame ) {
@@ -56,7 +51,7 @@
 
     var self = this,
       parent = typeof id === "string" ? Popcorn.dom.find( id ) : id,
-      elem,
+      elem = document.createElement( "iframe" ),
       impl = {
         src: EMPTY_STRING,
         networkState: self.NETWORK_EMPTY,
@@ -76,8 +71,6 @@
         duration: NaN,
         ended: false,
         paused: true,
-        width: parent.width|0   ? parent.width  : MIN_WIDTH,
-        height: parent.height|0 ? parent.height : MIN_HEIGHT,
         error: null
       },
       playerReady = false,
@@ -167,7 +160,7 @@
 
       window.removeEventListener( 'message', onStateChange, false );
       parent.removeChild( elem );
-      elem = null;
+      elem = document.createElement( "iframe" );
     }
 
     self.play = function() {
@@ -276,7 +269,7 @@
     // yet seekable.  We need to force a play() to get data
     // to download (mimic preload=auto), or seeks will fail.
     function startupMessage( event ) {
-      if( event.origin !== "http://player.vimeo.com" ) {
+      if( event.origin !== VIMEO_HOST ) {
         return;
       }
 
@@ -317,7 +310,7 @@
     }
 
     function onStateChange( event ) {
-      if( event.origin !== "http://player.vimeo.com" ) {
+      if( event.origin !== VIMEO_HOST ) {
         return;
       }
 
@@ -418,7 +411,7 @@
       delete queryKey.autoplay;
 
       // Create the base vimeo player string. It will always have query string options
-      src = "http://player.vimeo.com/video/" + ( /\d+$/ ).exec( src.path ) + "?";
+      src = VIMEO_HOST + '/video/' + ( /\d+$/ ).exec( src.path ) + "?";
       for( key in queryKey ) {
         if ( queryKey.hasOwnProperty( key ) ) {
           optionsArray.push( encodeURIComponent( key ) + "=" +
@@ -427,10 +420,9 @@
       }
       src += optionsArray.join( "&" );
 
-      elem = document.createElement( "iframe" );
       elem.id = playerUID;
-      elem.width = impl.width; // 500?
-      elem.height = impl.height; // 281?
+      elem.style.width = "100%";
+      elem.style.height = "100%";
       elem.frameBorder = 0;
       elem.webkitAllowFullScreen = true;
       elem.mozAllowFullScreen = true;
@@ -523,19 +515,13 @@
 
       width: {
         get: function() {
-          return elem.width;
-        },
-        set: function( aValue ) {
-          impl.width = aValue;
+          return self.parentNode.offsetWidth;
         }
       },
 
       height: {
         get: function() {
-          return elem.height;
-        },
-        set: function( aValue ) {
-          impl.height = aValue;
+          return self.parentNode.offsetHeight;
         }
       },
 
